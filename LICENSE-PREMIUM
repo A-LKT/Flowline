@@ -1,0 +1,69 @@
+Flowline Premium — Commercial License
+======================================
+
+Copyright (c) Flowline. All rights reserved.
+
+This license governs the "Premium" portions of Flowline. Everything else in this
+repository is licensed under the GNU Affero General Public License v3.0 (see the
+LICENSE file); this document applies ONLY to the Premium directories listed below and
+takes precedence over LICENSE for those files.
+
+Premium directories
+--------------------
+  - backend/src/plugins/assistant/          (LLM Assistant)
+  - backend/src/plugins/housekeeping/       (Housekeeping)
+  - backend/src/plugins/artifact-history/   (Artifact History)
+  - any directory a file header in this repository designates as "Flowline Premium",
+    including future multi-tenant modules.
+
+Grant
+-----
+Subject to a valid, current commercial subscription or license agreement with
+Flowline ("Commercial License") AND a valid license key issued by Flowline, you are
+granted a non-exclusive, non-transferable, non-sublicensable right to use, run, and
+self-host the Premium directories as part of Flowline, for the term and within the
+limits (seats, instances, features) stated in your Commercial License.
+
+Source availability, not open source
+------------------------------------
+The source of the Premium directories is published for transparency, review, and
+single-build packaging. Publication does NOT grant any license to use them. The
+Premium directories are NOT free or open-source software.
+
+Restrictions
+------------
+Without a Commercial License and a valid key, you may NOT:
+  - use, run, deploy, or otherwise operate the Premium directories, in production or
+    otherwise;
+  - enable, unlock, or cause the Premium features to run by any means, including
+    modifying, patching, bypassing, or disabling the license-verification code
+    (backend/src/edition.ts, backend/src/license/**) or forging, tampering with, or
+    sharing a license key;
+  - copy a license key to more installations than your Commercial License permits, or
+    circumvent instance binding or expiry;
+  - redistribute, sublicense, sell, or offer the Premium directories (or a service
+    derived from them) to third parties.
+
+The license-verification mechanism is a technical control. Circumventing it does not
+grant any right and is a breach of this license and, potentially, of applicable law.
+
+Relationship to AGPL-3.0
+------------------------
+Nothing here restricts your rights under AGPL-3.0 with respect to the non-Premium
+(core) portions of Flowline. You remain free to use, modify, and self-host the core
+under AGPL-3.0 without a Commercial License.
+
+Termination
+-----------
+This license terminates automatically if you breach it or if your Commercial License
+lapses or is revoked. On termination you must stop using the Premium directories.
+
+No warranty
+-----------
+THE PREMIUM DIRECTORIES ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED. TO THE MAXIMUM EXTENT PERMITTED BY LAW, FLOWLINE SHALL NOT BE LIABLE FOR
+ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM OR IN CONNECTION WITH THE PREMIUM
+DIRECTORIES OR THEIR USE.
+
+To obtain a Commercial License and key, contact Flowline.
+See PREMIUM-LICENSING.md for how licensing is enforced technically.

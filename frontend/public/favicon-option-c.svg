@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Option C: Pipeline / data flow — three horizontal rounded-rect nodes joined by a line -->
+  <rect width="32" height="32" rx="6" fill="#0d1117"/>
+  <!-- connector line -->
+  <line x1="4" y1="16" x2="28" y2="16" stroke="#30363d" stroke-width="2"/>
+  <!-- stage 1 -->
+  <rect x="3" y="12" width="7" height="8" rx="2" fill="#388bfd" opacity="0.9"/>
+  <!-- stage 2 -->
+  <rect x="12.5" y="12" width="7" height="8" rx="2" fill="#a371f7" opacity="0.9"/>
+  <!-- stage 3 -->
+  <rect x="22" y="12" width="7" height="8" rx="2" fill="#3fb950" opacity="0.9"/>
+  <!-- arrow between 1→2 -->
+  <polyline points="10,14.5 12.5,16 10,17.5" fill="none" stroke="#e6edf3" stroke-width="1" stroke-linejoin="round"/>
+  <!-- arrow between 2→3 -->
+  <polyline points="19.5,14.5 22,16 19.5,17.5" fill="none" stroke="#e6edf3" stroke-width="1" stroke-linejoin="round"/>
+</svg>

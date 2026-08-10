@@ -1,0 +1,7 @@
+**/node_modules
+whatsapp-bridge/dist
+**/dist
+**/.git
+.claude
+backend/data
+workflow-engine/public/mockServiceWorker.js

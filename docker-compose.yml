@@ -1,0 +1,66 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      - workflow_data:/app/data
+      - ./wa-media:/app/wa-media
+    environment:
+      NODE_ENV: production
+      DB_PATH: /app/data/workflow.db
+      PORT: "3001"
+      WHATSAPP_BRIDGE_URL: "http://whatsapp-bridge:3002"
+      VOICE_TO_TEXT_URL: "http://voice-to-text:9000"
+      FILES_INTERNAL_BASE_URL: "http://app:3001"   # URL the VTT container uses to download audio files
+      # Register optional services to show their status on the home page.
+      # Each entry: { "name", "url", "healthPath" (optional) }
+      REGISTERED_SERVICES: '[{"name":"WhatsApp Bridge","url":"http://whatsapp-bridge:3002","healthPath":"/health"}]'
+      # Delete finished job runs older than N days (0 or unset = keep forever).
+      # RUN_RETENTION_DAYS: "90"
+      # Require this token on every API request (Authorization: Bearer <token>).
+      # Strongly recommended: without it, anyone who can reach port 3001 can
+      # read workflows, run them, and export decrypted secrets.
+      # API_TOKEN: "${API_TOKEN}"
+      # Allowed cross-origin origins, comma-separated (unset = same-origin only).
+      # CORS_ORIGIN: "https://example.com"
+    cap_add:
+      - NET_RAW   # required for ICMP ping inside the container
+    restart: unless-stopped
+
+  whatsapp-bridge:
+    build:
+      context: ./whatsapp-bridge
+      dockerfile: Dockerfile
+    ports:
+      - "3002:3002"
+    volumes:
+      - wa_auth:/app/auth
+      - ./wa-media:/app/media
+    environment:
+      AUTH_DIR: /app/auth
+      SEND_PORT: "3002"
+      WORKFLOW_ENGINE_URL: "${WORKFLOW_ENGINE_URL:-http://app:3001}"
+      WEBHOOK_SECRET: "${WEBHOOK_SECRET}"  # must match the secret field on every webhook trigger in the UI
+      # ALLOW_FROM: "48511335900,48600123456" # comma-separated phone numbers; leave unset to allow all
+    restart: unless-stopped
+
+  voice-to-text:
+    build:
+      context: ./plugins/voice-to-text
+      dockerfile: Dockerfile
+    ports:
+      - "9000:9000"
+    volumes:
+      - vtt_models:/root/.cache
+    environment:
+      WHISPER_MODEL: "${WHISPER_MODEL:-base}"
+      WHISPER_LANG:  "${WHISPER_LANG:-}"
+    restart: unless-stopped
+
+volumes:
+  workflow_data:
+  wa_auth:
+  vtt_models:

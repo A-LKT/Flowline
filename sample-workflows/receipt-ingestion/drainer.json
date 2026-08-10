@@ -1,0 +1,83 @@
+{
+  "id": "receipt-drainer",
+  "name": "Receipt drainer (serialized, filesystem)",
+  "description": "Schedule workflow. Processes ONE queued receipt per tick. move-file atomically claims a job so overlapping ticks never double-process — steady, non-parallel processing regardless of intake rate. No Data Store setup required.",
+  "version": 1,
+  "variables": {},
+  "layoutDirection": "TB",
+  "nodes": [
+    {
+      "id": "ls",
+      "type": "list-files",
+      "name": "List queue",
+      "config": { "dir": "queue", "pattern": "*.json" },
+      "position": { "x": 0, "y": 0 }
+    },
+    {
+      "id": "any",
+      "type": "condition",
+      "name": "Any jobs?",
+      "config": { "expression": "outputs[\"ls\"].count > 0" },
+      "position": { "x": 0, "y": 140 }
+    },
+    {
+      "id": "claim",
+      "type": "move-file",
+      "name": "Claim oldest",
+      "config": { "from": "{{outputs[\"ls\"].files[0].path}}", "to": "processing/{{outputs[\"ls\"].files[0].name}}" },
+      "position": { "x": 0, "y": 280 }
+    },
+    {
+      "id": "got",
+      "type": "condition",
+      "name": "Claimed?",
+      "config": { "expression": "outputs[\"claim\"].moved === true" },
+      "position": { "x": 0, "y": 420 }
+    },
+    {
+      "id": "read",
+      "type": "read-local-file",
+      "name": "Read job",
+      "config": { "path": "{{outputs[\"claim\"].to}}", "format": "json" },
+      "position": { "x": 0, "y": 560 }
+    },
+    {
+      "id": "vision",
+      "type": "ollama-vision",
+      "name": "Read receipt",
+      "config": {
+        "model": "llava:7b",
+        "image": "{{outputs[\"read\"].content.path}}",
+        "prompt": "Extract the merchant, date and total amount from this receipt as JSON."
+      },
+      "position": { "x": 0, "y": 700 }
+    },
+    {
+      "id": "save",
+      "type": "write-file",
+      "name": "Save result",
+      "config": {
+        "filename": "results/{{outputs[\"ls\"].files[0].name}}",
+        "content": "{{outputs[\"vision\"].text}}",
+        "mimeType": "application/json"
+      },
+      "position": { "x": 0, "y": 840 }
+    },
+    {
+      "id": "done",
+      "type": "delete-file",
+      "name": "Remove job",
+      "config": { "path": "{{outputs[\"claim\"].to}}" },
+      "position": { "x": 0, "y": 980 }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "ls", "to": "any" },
+    { "id": "e2", "from": "any", "to": "claim", "fromHandle": "true" },
+    { "id": "e3", "from": "claim", "to": "got" },
+    { "id": "e4", "from": "got", "to": "read", "fromHandle": "true" },
+    { "id": "e5", "from": "read", "to": "vision" },
+    { "id": "e6", "from": "vision", "to": "save" },
+    { "id": "e7", "from": "save", "to": "done" }
+  ]
+}

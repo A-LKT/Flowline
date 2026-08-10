@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Option D: Abstract "W" lettermark built from node-and-edge motif -->
+  <rect width="32" height="32" rx="6" fill="#0d1117"/>
+  <defs>
+    <linearGradient id="wgrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#388bfd"/>
+      <stop offset="100%" stop-color="#a371f7"/>
+    </linearGradient>
+  </defs>
+  <!-- W strokes: two V shapes side by side -->
+  <polyline
+    points="5,8 10,24 16,14 22,24 27,8"
+    fill="none"
+    stroke="url(#wgrad)"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-linejoin="round"/>
+  <!-- dots at each vertex to suggest nodes -->
+  <circle cx="5"  cy="8"  r="2" fill="#388bfd"/>
+  <circle cx="10" cy="24" r="2" fill="#a371f7"/>
+  <circle cx="16" cy="14" r="2" fill="#e6edf3"/>
+  <circle cx="22" cy="24" r="2" fill="#a371f7"/>
+  <circle cx="27" cy="8"  r="2" fill="#388bfd"/>
+</svg>

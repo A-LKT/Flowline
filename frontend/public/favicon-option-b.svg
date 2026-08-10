@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Option B: Bold lightning bolt — clean geometric, single purple fill with blue highlight -->
+  <rect width="32" height="32" rx="6" fill="#0d1117"/>
+  <defs>
+    <linearGradient id="bolt" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#388bfd"/>
+      <stop offset="100%" stop-color="#a371f7"/>
+    </linearGradient>
+  </defs>
+  <!-- lightning bolt path centered in 32x32 -->
+  <path d="M19 3 L10 17 h7 L13 29 L22 15 h-7 Z" fill="url(#bolt)"/>
+</svg>

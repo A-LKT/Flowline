@@ -1,0 +1,39 @@
+{
+  "id": "receipt-intake",
+  "name": "Receipt intake (WhatsApp)",
+  "description": "Webhook workflow. Drops each incoming receipt as a job file in the queue/ directory and acknowledges. Does NO heavy work, so bursts never spawn parallel processing.",
+  "version": 1,
+  "variables": {},
+  "layoutDirection": "TB",
+  "nodes": [
+    {
+      "id": "job",
+      "type": "transform",
+      "name": "Build job",
+      "config": { "code": "return { path: variables.trigger.media[0], sender: variables.trigger.sender, ts: variables.trigger.timestamp };" },
+      "position": { "x": 0, "y": 0 }
+    },
+    {
+      "id": "enqueue",
+      "type": "write-file",
+      "name": "Enqueue job",
+      "config": {
+        "filename": "queue/{{outputs[\"job\"].ts}}-{{trigger.pn}}.json",
+        "content": "{{outputs[\"job\"]}}",
+        "mimeType": "application/json"
+      },
+      "position": { "x": 0, "y": 160 }
+    },
+    {
+      "id": "ack",
+      "type": "send-whatsapp",
+      "name": "Acknowledge",
+      "config": { "to": "{{trigger.sender}}", "text": "Receipt received — it will be processed shortly." },
+      "position": { "x": 0, "y": 320 }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "job", "to": "enqueue" },
+    { "id": "e2", "from": "enqueue", "to": "ack" }
+  ]
+}

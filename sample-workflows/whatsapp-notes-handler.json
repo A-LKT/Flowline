@@ -1,0 +1,280 @@
+{
+  "id": "c1a0ff00-cafe-4bee-8bad-c1a000000000",
+  "name": "WhatsApp Notes Handler",
+  "description": "Save and retrieve personal notes via WhatsApp. Commands: /note save | list | recall | search",
+  "version": 1,
+  "nodes": [
+    {
+      "id": "c1a00001-cafe-4bee-8bad-c1a000000001",
+      "type": "transform",
+      "name": "get first word",
+      "config": {
+        "code": "return trigger.args.trim().split(/\\s+/)[0].toLowerCase();"
+      },
+      "position": { "x": 600, "y": 320 }
+    },
+    {
+      "id": "c1a00002-cafe-4bee-8bad-c1a000000002",
+      "type": "switch",
+      "config": {
+        "expression": "input",
+        "case1": "save",
+        "case2": "list",
+        "case3": "recall",
+        "case4": "search"
+      },
+      "position": { "x": 600, "y": 400 }
+    },
+
+    {
+      "id": "c1a00003-cafe-4bee-8bad-c1a000000003",
+      "type": "label",
+      "config": { "text": "save", "fontSize": "sm", "color": "default" },
+      "position": { "x": 160, "y": 460 }
+    },
+    {
+      "id": "c1a00004-cafe-4bee-8bad-c1a000000004",
+      "type": "datetime",
+      "config": { "outputMode": "date", "offsetValue": 0, "offsetUnit": "days" },
+      "position": { "x": 400, "y": 480 }
+    },
+    {
+      "id": "c1a00005-cafe-4bee-8bad-c1a000000005",
+      "type": "transform",
+      "name": "extract note text",
+      "config": {
+        "code": "return trigger.args.trim().slice(5).trim();"
+      },
+      "position": { "x": 200, "y": 480 }
+    },
+    {
+      "id": "c1a00006-cafe-4bee-8bad-c1a000000006",
+      "type": "ollama-completion",
+      "config": {
+        "model": "llama3.2:3b",
+        "prompt": "Parse this note and return a JSON object:\n\nnote: {{input}}",
+        "system": "You are a note metadata extractor.\n\nFrom the note text extract structured metadata and return valid JSON only:\n\n{\n  \"title\": \"<5-8 word descriptive title in sentence case>\",\n  \"summary\": \"<one sentence capturing the key point>\",\n  \"tags\": [\"<keyword1>\", \"<keyword2>\"],\n  \"category\": \"<work|personal|idea|reference|health|finance|other>\"\n}\n\nRules:\n- title: concise, sentence-case, no punctuation at end\n- summary: one sentence, start with a verb or noun\n- tags: 1-4 relevant lowercase keywords\n- category: pick exactly one from the list\n- Output only valid JSON. No markdown, no explanation, no code fences.",
+        "temperature": 0.3
+      },
+      "position": { "x": 200, "y": 560 }
+    },
+    {
+      "id": "c1a00007-cafe-4bee-8bad-c1a000000007",
+      "type": "transform",
+      "name": "build note record",
+      "config": {
+        "code": "return {\n  ...JSON.parse(input.text),\n  \"body\": trigger.args.trim().slice(5).trim(),\n  \"date_added\": outputs[\"c1a00004-cafe-4bee-8bad-c1a000000004\"].value\n};"
+      },
+      "position": { "x": 200, "y": 640 }
+    },
+    {
+      "id": "c1a0000a-cafe-4bee-8bad-c1a00000000a",
+      "type": "send-whatsapp",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": ":: parsed note:\n{{JSON.stringify(input, \" \", 2)}}"
+      },
+      "position": { "x": 400, "y": 640 }
+    },
+    {
+      "id": "c1a00008-cafe-4bee-8bad-c1a000000008",
+      "type": "datastore-upsert",
+      "config": {
+        "tableId": "c1a0db00-cafe-4bee-8bad-c1a000000000",
+        "data": "{{input}}"
+      },
+      "position": { "x": 200, "y": 720 }
+    },
+    {
+      "id": "c1a00009-cafe-4bee-8bad-c1a000000009",
+      "type": "send-whatsapp",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": ":: note saved"
+      },
+      "position": { "x": 200, "y": 800 }
+    },
+
+    {
+      "id": "c1a0000b-cafe-4bee-8bad-c1a00000000b",
+      "type": "label",
+      "config": { "text": "list", "fontSize": "sm", "color": "default" },
+      "position": { "x": 460, "y": 460 }
+    },
+    {
+      "id": "c1a0000c-cafe-4bee-8bad-c1a00000000c",
+      "type": "datastore-query",
+      "config": {
+        "tableId": "c1a0db00-cafe-4bee-8bad-c1a000000000",
+        "filter": "{}",
+        "limit": 100
+      },
+      "position": { "x": 500, "y": 520 }
+    },
+    {
+      "id": "c1a0000d-cafe-4bee-8bad-c1a00000000d",
+      "type": "transform",
+      "name": "format note list",
+      "config": {
+        "code": "const sorted = input.rows.sort((a, b) => b.date_added.localeCompare(a.date_added)).slice(0, 10);\nreturn sorted.map(r => `[${r.date_added}] ${r.title}  (${r.category})`).join('\\n');"
+      },
+      "position": { "x": 500, "y": 600 }
+    },
+    {
+      "id": "c1a0000e-cafe-4bee-8bad-c1a00000000e",
+      "type": "send-whatsapp",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": ":: recent notes:\n{{input}}"
+      },
+      "position": { "x": 500, "y": 680 }
+    },
+
+    {
+      "id": "c1a0000f-cafe-4bee-8bad-c1a00000000f",
+      "type": "label",
+      "config": { "text": "recall", "fontSize": "sm", "color": "default" },
+      "position": { "x": 720, "y": 460 }
+    },
+    {
+      "id": "c1a00010-cafe-4bee-8bad-c1a000000010",
+      "type": "transform",
+      "name": "extract recall query",
+      "config": {
+        "code": "return trigger.args.trim().slice(7).trim();"
+      },
+      "position": { "x": 760, "y": 520 }
+    },
+    {
+      "id": "c1a00011-cafe-4bee-8bad-c1a000000011",
+      "type": "datastore-query",
+      "config": {
+        "tableId": "c1a0db00-cafe-4bee-8bad-c1a000000000",
+        "filter": "{}",
+        "limit": 100
+      },
+      "position": { "x": 760, "y": 600 }
+    },
+    {
+      "id": "c1a0001a-cafe-4bee-8bad-c1a00000001a",
+      "type": "transform",
+      "name": "combine query and notes",
+      "config": {
+        "code": "return {\n  query: outputs[\"c1a00010-cafe-4bee-8bad-c1a000000010\"],\n  notes: input.rows\n};"
+      },
+      "position": { "x": 760, "y": 680 }
+    },
+    {
+      "id": "c1a00012-cafe-4bee-8bad-c1a000000012",
+      "type": "ollama-completion",
+      "config": {
+        "model": "llama3.2:3b",
+        "prompt": "User question: {{input.query}}\n\nNotes: {{JSON.stringify(input.notes)}}",
+        "system": "You are a personal note recall assistant.\n\nThe user has asked a question. Search through their notes and provide a relevant answer.\n\nOutput format — plain text only, no markdown:\n\n📖 Answer:\n<Your answer based on the notes>\n\n📎 From:\n- <Note title> (<date_added>)\n\nIf no relevant notes exist, reply: No notes found matching your query.\n\nBe concise. Max 150 words.",
+        "temperature": 0.4
+      },
+      "position": { "x": 760, "y": 760 }
+    },
+    {
+      "id": "c1a00013-cafe-4bee-8bad-c1a000000013",
+      "type": "send-whatsapp",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": ":: recall\n{{input.text}}"
+      },
+      "position": { "x": 760, "y": 840 }
+    },
+
+    {
+      "id": "c1a00014-cafe-4bee-8bad-c1a000000014",
+      "type": "label",
+      "config": { "text": "search", "fontSize": "sm", "color": "default" },
+      "position": { "x": 980, "y": 460 }
+    },
+    {
+      "id": "c1a00015-cafe-4bee-8bad-c1a000000015",
+      "type": "transform",
+      "name": "extract search keyword",
+      "config": {
+        "code": "return trigger.args.trim().slice(7).trim().toLowerCase();"
+      },
+      "position": { "x": 1020, "y": 520 }
+    },
+    {
+      "id": "c1a00016-cafe-4bee-8bad-c1a000000016",
+      "type": "datastore-query",
+      "config": {
+        "tableId": "c1a0db00-cafe-4bee-8bad-c1a000000000",
+        "filter": "{}",
+        "limit": 200
+      },
+      "position": { "x": 1020, "y": 600 }
+    },
+    {
+      "id": "c1a00017-cafe-4bee-8bad-c1a000000017",
+      "type": "transform",
+      "name": "filter by keyword",
+      "config": {
+        "code": "const kw = outputs[\"c1a00015-cafe-4bee-8bad-c1a000000015\"];\nconst hits = input.rows.filter(r =>\n  (r.title || '').toLowerCase().includes(kw) ||\n  (r.summary || '').toLowerCase().includes(kw) ||\n  (r.body || '').toLowerCase().includes(kw) ||\n  (Array.isArray(r.tags) ? r.tags : []).some(t => t.toLowerCase().includes(kw))\n);\nif (!hits.length) return 'no notes matched.';\nreturn hits.map(r => `[${r.date_added}] ${r.title}\\n  ${r.summary}`).join('\\n\\n');"
+      },
+      "position": { "x": 1020, "y": 680 }
+    },
+    {
+      "id": "c1a00018-cafe-4bee-8bad-c1a000000018",
+      "type": "send-whatsapp",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": ":: search results:\n{{input}}"
+      },
+      "position": { "x": 1020, "y": 760 }
+    },
+
+    {
+      "id": "c1a00019-cafe-4bee-8bad-c1a000000019",
+      "type": "label",
+      "config": { "text": "unrecognized\ncommand", "fontSize": "sm", "color": "default" },
+      "position": { "x": 1240, "y": 460 }
+    },
+    {
+      "id": "c1a00020-cafe-4bee-8bad-c1a000000020",
+      "type": "send-whatsapp",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": ":: unrecognized command. supported:\n/note save <text>\n/note list\n/note recall <question>\n/note search <keyword>"
+      },
+      "position": { "x": 1280, "y": 520 }
+    }
+  ],
+  "edges": [
+    { "id": "e1e00001-cafe-4bee-8bad-e1e000000001", "from": "c1a00001-cafe-4bee-8bad-c1a000000001", "to": "c1a00002-cafe-4bee-8bad-c1a000000002" },
+
+    { "id": "e1e00002-cafe-4bee-8bad-e1e000000002", "from": "c1a00002-cafe-4bee-8bad-c1a000000002", "to": "c1a00005-cafe-4bee-8bad-c1a000000005", "fromHandle": "1" },
+    { "id": "e1e00003-cafe-4bee-8bad-e1e000000003", "from": "c1a00002-cafe-4bee-8bad-c1a000000002", "to": "c1a00004-cafe-4bee-8bad-c1a000000004", "fromHandle": "1" },
+    { "id": "e1e00004-cafe-4bee-8bad-e1e000000004", "from": "c1a00005-cafe-4bee-8bad-c1a000000005", "to": "c1a00006-cafe-4bee-8bad-c1a000000006" },
+    { "id": "e1e00005-cafe-4bee-8bad-e1e000000005", "from": "c1a00006-cafe-4bee-8bad-c1a000000006", "to": "c1a00007-cafe-4bee-8bad-c1a000000007" },
+    { "id": "e1e00006-cafe-4bee-8bad-e1e000000006", "from": "c1a00007-cafe-4bee-8bad-c1a000000007", "to": "c1a0000a-cafe-4bee-8bad-c1a00000000a" },
+    { "id": "e1e00007-cafe-4bee-8bad-e1e000000007", "from": "c1a00007-cafe-4bee-8bad-c1a000000007", "to": "c1a00008-cafe-4bee-8bad-c1a000000008" },
+    { "id": "e1e00008-cafe-4bee-8bad-e1e000000008", "from": "c1a00008-cafe-4bee-8bad-c1a000000008", "to": "c1a00009-cafe-4bee-8bad-c1a000000009" },
+
+    { "id": "e1e00009-cafe-4bee-8bad-e1e000000009", "from": "c1a00002-cafe-4bee-8bad-c1a000000002", "to": "c1a0000c-cafe-4bee-8bad-c1a00000000c", "fromHandle": "2" },
+    { "id": "e1e0000a-cafe-4bee-8bad-e1e00000000a", "from": "c1a0000c-cafe-4bee-8bad-c1a00000000c", "to": "c1a0000d-cafe-4bee-8bad-c1a00000000d" },
+    { "id": "e1e0000b-cafe-4bee-8bad-e1e00000000b", "from": "c1a0000d-cafe-4bee-8bad-c1a00000000d", "to": "c1a0000e-cafe-4bee-8bad-c1a00000000e" },
+
+    { "id": "e1e0000c-cafe-4bee-8bad-e1e00000000c", "from": "c1a00002-cafe-4bee-8bad-c1a000000002", "to": "c1a00010-cafe-4bee-8bad-c1a000000010", "fromHandle": "3" },
+    { "id": "e1e0000d-cafe-4bee-8bad-e1e00000000d", "from": "c1a00010-cafe-4bee-8bad-c1a000000010", "to": "c1a00011-cafe-4bee-8bad-c1a000000011" },
+    { "id": "e1e0000e-cafe-4bee-8bad-e1e00000000e", "from": "c1a00011-cafe-4bee-8bad-c1a000000011", "to": "c1a0001a-cafe-4bee-8bad-c1a00000001a" },
+    { "id": "e1e0000f-cafe-4bee-8bad-e1e00000000f", "from": "c1a0001a-cafe-4bee-8bad-c1a00000001a", "to": "c1a00012-cafe-4bee-8bad-c1a000000012" },
+    { "id": "e1e00010-cafe-4bee-8bad-e1e000000010", "from": "c1a00012-cafe-4bee-8bad-c1a000000012", "to": "c1a00013-cafe-4bee-8bad-c1a000000013" },
+
+    { "id": "e1e00011-cafe-4bee-8bad-e1e000000011", "from": "c1a00002-cafe-4bee-8bad-c1a000000002", "to": "c1a00015-cafe-4bee-8bad-c1a000000015", "fromHandle": "4" },
+    { "id": "e1e00012-cafe-4bee-8bad-e1e000000012", "from": "c1a00015-cafe-4bee-8bad-c1a000000015", "to": "c1a00016-cafe-4bee-8bad-c1a000000016" },
+    { "id": "e1e00013-cafe-4bee-8bad-e1e000000013", "from": "c1a00016-cafe-4bee-8bad-c1a000000016", "to": "c1a00017-cafe-4bee-8bad-c1a000000017" },
+    { "id": "e1e00014-cafe-4bee-8bad-e1e000000014", "from": "c1a00017-cafe-4bee-8bad-c1a000000017", "to": "c1a00018-cafe-4bee-8bad-c1a000000018" },
+
+    { "id": "e1e00015-cafe-4bee-8bad-e1e000000015", "from": "c1a00002-cafe-4bee-8bad-c1a000000002", "to": "c1a00020-cafe-4bee-8bad-c1a000000020", "fromHandle": "default" }
+  ],
+  "variables": {},
+  "createdAt": 1747219200000,
+  "updatedAt": 1747219200000,
+  "layoutDirection": "TB"
+}

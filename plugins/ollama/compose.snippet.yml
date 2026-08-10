@@ -1,0 +1,13 @@
+# Ollama runs as a host process, not a Docker service.
+# Install it from https://ollama.com and pull the models you need:
+#   ollama pull llama3
+#
+# The ollama-completion node calls POST ${OLLAMA_URL}/api/generate
+# with JSON body { "model", "prompt", "stream": false, "system"?, "options": { "temperature" } }
+# and reads { "response": "..." } from the reply.
+#
+# Add OLLAMA_URL to the app service's environment block if the default
+# (http://host.docker.internal:11434) doesn't match your setup:
+#
+#   environment:
+#     OLLAMA_URL: "http://host.docker.internal:11434"

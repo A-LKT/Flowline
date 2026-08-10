@@ -1,0 +1,70 @@
+{
+  "id": "whatsapp-receipt-intake",
+  "name": "WhatsApp Receipt Intake",
+  "description": "Lightweight WhatsApp webhook intake: validates that the message carries a photo, drops one job file into queue/ referencing the receipt image, and immediately acknowledges the sender. Does NO heavy work so it returns fast and never blocks. The drainer workflow processes the queue asynchronously.",
+  "version": 1,
+  "variables": {},
+  "layoutDirection": "TB",
+  "nodes": [
+    {
+      "id": "hasImage",
+      "type": "condition",
+      "name": "Has photo?",
+      "description": "Only enqueue if the WhatsApp message actually carried media.",
+      "config": {
+        "expression": "Array.isArray(variables.trigger.media) && variables.trigger.media.length > 0"
+      },
+      "position": { "x": 0, "y": 0 }
+    },
+    {
+      "id": "job",
+      "type": "transform",
+      "name": "Build job",
+      "description": "Capture who sent it, the receipt image path (in the shared wa-media volume), and a unique id so two photos in the same second never collide.",
+      "config": {
+        "code": "const media = variables.trigger.media || [];\nconst first = String(media[0] || '');\nreturn {\n  sender: variables.trigger.sender,\n  pn: variables.trigger.pn,\n  media,\n  image: first,\n  basename: first.split(/[\\\\/]/).pop(),\n  ts: variables.trigger.timestamp,\n  uid: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)\n};"
+      },
+      "position": { "x": -200, "y": 160 }
+    },
+    {
+      "id": "enqueue",
+      "type": "write-file",
+      "name": "Enqueue job",
+      "description": "Write one JSON job file into queue/. Filename is sortable by timestamp (FIFO) and uniquified by uid.",
+      "config": {
+        "filename": "queue/{{outputs[\"job\"].ts}}-{{outputs[\"job\"].uid}}.json",
+        "content": "{{outputs[\"job\"]}}",
+        "mimeType": "application/json"
+      },
+      "position": { "x": -200, "y": 320 }
+    },
+    {
+      "id": "ack",
+      "type": "send-whatsapp",
+      "name": "Acknowledge",
+      "description": "Instant feedback to the sender that the receipt was received and queued.",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": "Receipt received ✅ — queued for processing. I'll send you the details shortly."
+      },
+      "position": { "x": -200, "y": 480 }
+    },
+    {
+      "id": "noImage",
+      "type": "send-whatsapp",
+      "name": "Ask for a photo",
+      "description": "No media on the message — tell the user to attach a receipt photo.",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": "I didn't find a photo in that message. Please send a picture of the receipt and I'll process it."
+      },
+      "position": { "x": 200, "y": 160 }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "hasImage", "to": "job", "fromHandle": "true" },
+    { "id": "e2", "from": "job", "to": "enqueue" },
+    { "id": "e3", "from": "enqueue", "to": "ack" },
+    { "id": "e4", "from": "hasImage", "to": "noImage", "fromHandle": "false" }
+  ]
+}

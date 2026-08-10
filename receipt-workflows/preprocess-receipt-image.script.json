@@ -1,0 +1,16 @@
+{
+  "id": "preprocess-receipt-image",
+  "name": "preprocess-receipt-image",
+  "description": "Sandbox (Docker) script. Takes a base64 image, auto-orients it, converts to grayscale, stretches contrast (normalize + a gentle linear boost), sharpens faded thermal print, and downscales the long edge to maxEdge. Emits receipt-pre.jpg, which the engine serves under /files/ so the vision node can fetch it. Requires Docker running on the host.",
+  "code": "const sharp = require('sharp');\nconst b64 = input.imageB64;\nif (!b64 || typeof b64 !== 'string') throw new Error('imageB64 input missing or not a string');\nconst maxEdge = Number(input.maxEdge) > 0 ? Number(input.maxEdge) : 1600;\nconst buf = Buffer.from(b64, 'base64');\n\nlet img = sharp(buf, { failOn: 'none' })\n  .rotate()        // honor EXIF orientation from phone cameras\n  .grayscale()     // it's a B&W document — drop chroma noise\n  .normalize();    // stretch tonal range so faint ink reaches full black/white\n\n// Gentle extra contrast + unsharp mask to crisp up faded thermal receipts.\n// a>1 steepens contrast; b shifts the black point down slightly.\nimg = img.linear(1.15, -15).sharpen();\n\n// Downscale the long edge to maxEdge; never upscale (withoutEnlargement).\n// Smaller images = fewer vision tokens = lower VRAM and faster inference.\nimg = img.resize({ width: maxEdge, height: maxEdge, fit: 'inside', withoutEnlargement: true });\n\nconst out = await img.jpeg({ quality: 90 }).toBuffer();\nconst meta = await sharp(out).metadata();\nfs.writeFileSync(path.join(outputDir, 'receipt-pre.jpg'), out);\nreturn { width: meta.width, height: meta.height, bytes: out.length };",
+  "timeout": 300,
+  "inputs": [
+    { "name": "imageB64", "description": "Base64-encoded source image (from a read-file node, format=base64).", "type": "string" },
+    { "name": "maxEdge", "description": "Max length of the longest edge in pixels; image is downscaled to fit. Default 1600.", "type": "number" }
+  ],
+  "sandbox": true,
+  "dockerImage": "node:22-slim",
+  "npmInstall": "sharp",
+  "createdAt": 0,
+  "updatedAt": 0
+}

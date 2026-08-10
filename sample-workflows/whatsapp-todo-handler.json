@@ -1,0 +1,391 @@
+{
+  "id": "d9cad490-a7bd-4b10-a2f1-06b2d095b5f5",
+  "name": "WhatsApp TODO handler",
+  "description": "",
+  "version": 1,
+  "nodes": [
+    {
+      "id": "e544969b-c745-4b35-80e4-0769c2b11204",
+      "type": "transform",
+      "name": "get first word",
+      "config": {
+        "code": "return trigger.args.trim().split(/\\s+/)[0];"
+      },
+      "position": { "x": 832, "y": 320 }
+    },
+    {
+      "id": "de2eccd1-6f6d-4a43-a351-716fc0a32687",
+      "type": "datetime",
+      "config": {
+        "outputMode": "date",
+        "offsetValue": 0,
+        "offsetUnit": "days"
+      },
+      "position": { "x": 600, "y": 320 }
+    },
+    {
+      "id": "48437b6c-fee6-4113-9556-0c6b5adca0c5",
+      "type": "switch",
+      "config": {
+        "expression": "input",
+        "case1": "add",
+        "case2": "list",
+        "case3": "complete",
+        "case4": "insights"
+      },
+      "position": { "x": 832, "y": 400 }
+    },
+
+    {
+      "id": "79180c35-0d2a-42fe-8214-3309049ae8a0",
+      "type": "label",
+      "config": { "text": "add", "fontSize": "sm", "color": "default" },
+      "position": { "x": 160, "y": 464 }
+    },
+    {
+      "id": "a322d67d-f298-4ae5-8c58-a620ebdd0e22",
+      "type": "transform",
+      "config": {
+        "code": "return trigger.args.slice(4);"
+      },
+      "position": { "x": 200, "y": 528 }
+    },
+    {
+      "id": "b7ff37b5-6596-4567-b5e6-7e4467f15fd0",
+      "type": "ollama-completion",
+      "config": {
+        "model": "llama3.2:3b",
+        "prompt": "Parse the text of the TODO item and return a JSON object with this exact structure:\n\n{\n  \"item\": \"<the original TODO text>\",\n  \"priority\": \"<low | medium | high>\"\n}\n\n---\n\ntodo content: {{input}}",
+        "system": "Rules:\n\n* Copy the full TODO text into item without changing its meaning.\n* Set date_added to the current date.\n* Infer priority from the wording:\n    high: urgent, critical, blocking, or includes words like \"ASAP\", \"immediately\", \"urgent\".\n    medium: important but not urgent.\n    low: optional, someday, nice-to-have, or non-urgent.\n* Output only valid JSON. Do not include explanations or markdown. Just the JSON text!\n",
+        "temperature": 0.7
+      },
+      "position": { "x": 200, "y": 608 }
+    },
+    {
+      "id": "7c810441-c20a-4204-933c-ca898eaafbdb",
+      "type": "transform",
+      "config": {
+        "code": "return {\r\n    ...JSON.parse(input.text),\r\n    \"date_added\": outputs[\"de2eccd1-6f6d-4a43-a351-716fc0a32687\"].value,\r\n    \"completed\": false,\r\n    \"date_completed\": null\r\n};"
+      },
+      "position": { "x": 200, "y": 704 }
+    },
+    {
+      "id": "727ad348-4119-4557-83df-ee0b1a88bf33",
+      "type": "send-whatsapp",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": ":: digested:\n{{JSON.stringify(input, \" \", 2)}}"
+      },
+      "position": { "x": 360, "y": 784 }
+    },
+    {
+      "id": "27d138cc-9c85-415b-8620-a0b42ef72428",
+      "type": "datastore-upsert",
+      "config": {
+        "tableId": "591f7600-3eb9-4ff5-9c37-ac0e3d4aca74",
+        "data": "{{input}}"
+      },
+      "position": { "x": 200, "y": 784 }
+    },
+    {
+      "id": "7ede78dd-29b1-4bf9-97e5-ab2c4e490174",
+      "type": "send-whatsapp",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": ":: todo saved",
+        "tableId": "",
+        "data": ""
+      },
+      "position": { "x": 200, "y": 864 }
+    },
+
+    {
+      "id": "fe52eb3d-9a88-4d60-94d1-16cf5bc413ac",
+      "type": "label",
+      "config": { "text": "list\nuncompleted", "fontSize": "sm", "color": "default" },
+      "position": { "x": 510, "y": 464 }
+    },
+    {
+      "id": "50d2b8e1-e22a-4541-9ba6-7bea3e7b5cba",
+      "type": "datastore-query",
+      "config": {
+        "tableId": "591f7600-3eb9-4ff5-9c37-ac0e3d4aca74",
+        "filter": "{\"completed\": false}",
+        "limit": 100
+      },
+      "position": { "x": 550, "y": 528 }
+    },
+    {
+      "id": "085d69c7-0007-4646-a647-3fb428befa2d",
+      "type": "transform",
+      "config": {
+        "code": "return input.rows.map(({ item, priority }) => `[${priority}] ${item}`);"
+      },
+      "position": { "x": 550, "y": 608 }
+    },
+    {
+      "id": "6eb1fbb0-40cf-491c-8ded-aca9310179a6",
+      "type": "send-whatsapp",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": ":: incomplete todos:\n{{JSON.stringify(input, \" \", 2)}}"
+      },
+      "position": { "x": 550, "y": 688 }
+    },
+
+    {
+      "id": "c0de0001-cafe-4bee-8bad-c0de00000001",
+      "type": "label",
+      "config": { "text": "complete", "fontSize": "sm", "color": "default" },
+      "position": { "x": 810, "y": 464 }
+    },
+    {
+      "id": "c0de0002-cafe-4bee-8bad-c0de00000002",
+      "type": "transform",
+      "name": "extract completion text",
+      "config": {
+        "code": "return trigger.args.slice(9).trim();"
+      },
+      "position": { "x": 850, "y": 528 }
+    },
+    {
+      "id": "c0de0004-cafe-4bee-8bad-c0de00000004",
+      "type": "datastore-query",
+      "config": {
+        "tableId": "591f7600-3eb9-4ff5-9c37-ac0e3d4aca74",
+        "filter": "{\"completed\": false}",
+        "limit": 100
+      },
+      "position": { "x": 850, "y": 608 }
+    },
+    {
+      "id": "c0de0005-cafe-4bee-8bad-c0de00000005",
+      "type": "transform",
+      "name": "combine input and todos",
+      "config": {
+        "code": "return {\n  query: outputs[\"c0de0002-cafe-4bee-8bad-c0de00000002\"],\n  todos: input.rows\n};"
+      },
+      "position": { "x": 850, "y": 688 }
+    },
+    {
+      "id": "c0de0006-cafe-4bee-8bad-c0de00000006",
+      "type": "ollama-completion",
+      "config": {
+        "model": "llama3.2:3b",
+        "prompt": "User wants to complete: {{input.query}}\n\nPending todos: {{JSON.stringify(input.todos)}}",
+        "system": "You are a task matcher. The user has described a task they want to mark as completed. Find the single best matching todo from the list and respond with ONLY its id value — nothing else, no explanation, no punctuation.",
+        "temperature": 0.1
+      },
+      "position": { "x": 850, "y": 768 }
+    },
+    {
+      "id": "c0de0007-cafe-4bee-8bad-c0de00000007",
+      "type": "transform",
+      "name": "build completion record",
+      "config": {
+        "code": "const matchedId = input.text.trim();\nconst matched = outputs[\"c0de0004-cafe-4bee-8bad-c0de00000004\"].rows.find(r => r.id == matchedId);\nif (!matched) return null;\nreturn {\n  ...matched,\n  completed: true,\n  date_completed: outputs[\"de2eccd1-6f6d-4a43-a351-716fc0a32687\"].value\n};"
+      },
+      "position": { "x": 850, "y": 848 }
+    },
+    {
+      "id": "c0de0008-cafe-4bee-8bad-c0de00000008",
+      "type": "datastore-upsert",
+      "config": {
+        "tableId": "591f7600-3eb9-4ff5-9c37-ac0e3d4aca74",
+        "data": "{{input}}"
+      },
+      "position": { "x": 850, "y": 928 }
+    },
+    {
+      "id": "c0de0009-cafe-4bee-8bad-c0de00000009",
+      "type": "transform",
+      "name": "format completion confirm",
+      "config": {
+        "code": "const matched = outputs[\"c0de0007-cafe-4bee-8bad-c0de00000007\"];\nif (!matched) return ':: no matching todo found. try /todo list to see what is pending.';\nreturn `:: marked done:\\n✅ [${matched.priority}] ${matched.item}\\n📅 ${matched.date_completed}`;"
+      },
+      "position": { "x": 850, "y": 1008 }
+    },
+    {
+      "id": "c0de000a-cafe-4bee-8bad-c0de0000000a",
+      "type": "send-whatsapp",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": "{{input}}"
+      },
+      "position": { "x": 850, "y": 1088 }
+    },
+
+    {
+      "id": "6da976f8-eb4d-441d-8806-8a544138dde6",
+      "type": "datastore-query",
+      "config": {
+        "tableId": "591f7600-3eb9-4ff5-9c37-ac0e3d4aca74",
+        "filter": "{\"completed\": false}",
+        "limit": 100
+      },
+      "position": { "x": 1150, "y": 528 }
+    },
+    {
+      "id": "56598268-53c2-4bf9-a4ad-f3052be7ece1",
+      "type": "ollama-completion",
+      "config": {
+        "model": "llama3.2:3b",
+        "prompt": "todo list: {{JSON.stringify(input)}}",
+        "system": "You are a task analysis assistant.\n\nYour job is to analyze a todo list and provide short, actionable insights in plain text for a messaging platform.\n\nInput:\nA JSON object with a \"rows\" array. Each row contains:\n- id: unique identifier\n- item: task description\n- priority: high, medium, or low\n- date_added: YYYY-MM-DD\n- completed: 0 or 1\n- date_completed: YYYY-MM-DD or null\n\nAnalysis rules:\n- Ignore completed tasks.\n- Recommend the next task to work on.\n- Higher priority tasks should generally come first.\n- If priorities are equal, prefer tasks that seem time-sensitive.\n- If still tied, prefer the oldest task.\n- Tasks containing words such as \"submit\", \"apply\", \"request\", \"deadline\", \"payment\", \"school\", \"doctor\", \"appointment\", or similar terms in any language may be time-sensitive.\n- Identify tasks that can be combined into one trip or session.\n- Highlight easy quick wins.\n- Do not invent deadlines.\n\nOutput format:\nReturn plain text only. Do not use JSON, Markdown, or code fences.\n\nUse exactly this structure:\n\n📌 Next task:\n<Task description>\n<One short sentence explaining why this should be done next.>\n\n⚠️ Urgent:\n- <Task description>\n- <Task description>\n(If none, write: None.)\n\n⚡ Quick wins:\n- <Task description>\n(If none, write: None.)\n\n🧩 Can be grouped:\n- <Task A> + <Task B>: <Short reason>\n(If none, write: None.)\n\n💡 Insights:\n- <Actionable observation>\n- <Actionable observation>\n\n🎯 Suggested focus:\n<One sentence describing the best next step.>\n\nStyle guidelines:\n- Keep the response under 150 words when possible.\n- Be concise and practical.\n- Use the original task descriptions exactly as provided.\n- Preserve the original language of task names.\n- If all tasks are completed, state that there are no pending tasks.\n",
+        "temperature": 0.7
+      },
+      "position": { "x": 1150, "y": 608 }
+    },
+    {
+      "id": "f5ae65b0-9586-41ed-94ba-90b7313eb90b",
+      "type": "send-whatsapp",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": ":: todo insights:\n{{input.text}}"
+      },
+      "position": { "x": 1150, "y": 688 }
+    },
+
+    {
+      "id": "9a9a7d1b-8f93-479a-9369-75eae631b84a",
+      "type": "label",
+      "config": { "text": "unrecognized\ncommand", "fontSize": "sm", "color": "default" },
+      "position": { "x": 1400, "y": 464 }
+    },
+    {
+      "id": "5fda77ee-4b00-4e71-b372-8574456f059f",
+      "type": "send-whatsapp",
+      "config": {
+        "to": "{{trigger.sender}}",
+        "text": ":: unrecognized command. see supported commands:\n/todo add\n/todo list\n/todo complete\n/todo insights"
+      },
+      "position": { "x": 1440, "y": 528 }
+    }
+  ],
+  "edges": [
+    {
+      "id": "da7e0001-cafe-4bee-8bad-da7e00000001",
+      "from": "e544969b-c745-4b35-80e4-0769c2b11204",
+      "to": "de2eccd1-6f6d-4a43-a351-716fc0a32687"
+    },
+    {
+      "id": "56db3fe2-cc3e-406a-8052-bacef66693cb",
+      "from": "e544969b-c745-4b35-80e4-0769c2b11204",
+      "to": "48437b6c-fee6-4113-9556-0c6b5adca0c5"
+    },
+    {
+      "id": "a55bd38e-fbde-4148-8007-13583a3d3da9",
+      "from": "48437b6c-fee6-4113-9556-0c6b5adca0c5",
+      "to": "a322d67d-f298-4ae5-8c58-a620ebdd0e22",
+      "fromHandle": "1"
+    },
+    {
+      "id": "f8830c50-683b-4a6d-a8f0-fd77edb7e815",
+      "from": "a322d67d-f298-4ae5-8c58-a620ebdd0e22",
+      "to": "b7ff37b5-6596-4567-b5e6-7e4467f15fd0"
+    },
+    {
+      "id": "220b904e-9a05-4ab4-8ee0-c82ff0a5aa2d",
+      "from": "b7ff37b5-6596-4567-b5e6-7e4467f15fd0",
+      "to": "7c810441-c20a-4204-933c-ca898eaafbdb"
+    },
+    {
+      "id": "a134e285-7a49-49c0-9812-0bf43493c24d",
+      "from": "7c810441-c20a-4204-933c-ca898eaafbdb",
+      "to": "727ad348-4119-4557-83df-ee0b1a88bf33"
+    },
+    {
+      "id": "49602905-07d4-4314-a8ae-16a061dedf33",
+      "from": "7c810441-c20a-4204-933c-ca898eaafbdb",
+      "to": "27d138cc-9c85-415b-8620-a0b42ef72428"
+    },
+    {
+      "id": "8f319c77-0fcf-402f-a244-1203d6311ff5",
+      "from": "27d138cc-9c85-415b-8620-a0b42ef72428",
+      "to": "7ede78dd-29b1-4bf9-97e5-ab2c4e490174"
+    },
+    {
+      "id": "83fe6b26-0c2d-4b9b-a437-31cfc869f2ac",
+      "from": "48437b6c-fee6-4113-9556-0c6b5adca0c5",
+      "to": "50d2b8e1-e22a-4541-9ba6-7bea3e7b5cba",
+      "fromHandle": "2"
+    },
+    {
+      "id": "e072f230-b087-49a0-ad1f-5c4e66960365",
+      "from": "50d2b8e1-e22a-4541-9ba6-7bea3e7b5cba",
+      "to": "085d69c7-0007-4646-a647-3fb428befa2d"
+    },
+    {
+      "id": "8b945673-c7a6-4d3c-990f-1693cffb00e9",
+      "from": "085d69c7-0007-4646-a647-3fb428befa2d",
+      "to": "6eb1fbb0-40cf-491c-8ded-aca9310179a6"
+    },
+    {
+      "id": "c0dee001-cafe-4bee-8bad-c0dee0000001",
+      "from": "48437b6c-fee6-4113-9556-0c6b5adca0c5",
+      "to": "c0de0002-cafe-4bee-8bad-c0de00000002",
+      "fromHandle": "3"
+    },
+    {
+      "id": "c0dee003-cafe-4bee-8bad-c0dee0000003",
+      "from": "c0de0002-cafe-4bee-8bad-c0de00000002",
+      "to": "c0de0004-cafe-4bee-8bad-c0de00000004"
+    },
+    {
+      "id": "c0dee004-cafe-4bee-8bad-c0dee0000004",
+      "from": "c0de0004-cafe-4bee-8bad-c0de00000004",
+      "to": "c0de0005-cafe-4bee-8bad-c0de00000005"
+    },
+    {
+      "id": "c0dee005-cafe-4bee-8bad-c0dee0000005",
+      "from": "c0de0005-cafe-4bee-8bad-c0de00000005",
+      "to": "c0de0006-cafe-4bee-8bad-c0de00000006"
+    },
+    {
+      "id": "c0dee006-cafe-4bee-8bad-c0dee0000006",
+      "from": "c0de0006-cafe-4bee-8bad-c0de00000006",
+      "to": "c0de0007-cafe-4bee-8bad-c0de00000007"
+    },
+    {
+      "id": "c0dee007-cafe-4bee-8bad-c0dee0000007",
+      "from": "c0de0007-cafe-4bee-8bad-c0de00000007",
+      "to": "c0de0008-cafe-4bee-8bad-c0de00000008"
+    },
+    {
+      "id": "c0dee008-cafe-4bee-8bad-c0dee0000008",
+      "from": "c0de0008-cafe-4bee-8bad-c0de00000008",
+      "to": "c0de0009-cafe-4bee-8bad-c0de00000009"
+    },
+    {
+      "id": "c0dee009-cafe-4bee-8bad-c0dee0000009",
+      "from": "c0de0009-cafe-4bee-8bad-c0de00000009",
+      "to": "c0de000a-cafe-4bee-8bad-c0de0000000a"
+    },
+    {
+      "id": "4288af90-56d3-4789-a5db-cef014d5fba9",
+      "from": "48437b6c-fee6-4113-9556-0c6b5adca0c5",
+      "to": "6da976f8-eb4d-441d-8806-8a544138dde6",
+      "fromHandle": "4"
+    },
+    {
+      "id": "aa589111-6880-4ece-90f1-2575ba5f329e",
+      "from": "6da976f8-eb4d-441d-8806-8a544138dde6",
+      "to": "56598268-53c2-4bf9-a4ad-f3052be7ece1"
+    },
+    {
+      "id": "366552e7-5314-4e36-8cbe-fe740d34ed31",
+      "from": "56598268-53c2-4bf9-a4ad-f3052be7ece1",
+      "to": "f5ae65b0-9586-41ed-94ba-90b7313eb90b"
+    },
+    {
+      "id": "76f42019-ce24-47ea-9634-47e86f01d7bb",
+      "from": "48437b6c-fee6-4113-9556-0c6b5adca0c5",
+      "to": "5fda77ee-4b00-4e71-b372-8574456f059f",
+      "fromHandle": "default"
+    }
+  ],
+  "variables": {},
+  "createdAt": 1778653264226,
+  "updatedAt": 1747353600000,
+  "layoutDirection": "TB"
+}

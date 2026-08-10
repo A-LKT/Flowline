@@ -1,0 +1,147 @@
+{
+  "id": "receipt-queue-drainer",
+  "name": "Receipt Queue Drainer (Ollama Vision)",
+  "description": "Schedule-triggered drainer. Each tick: list queue/ oldest-first (FIFO), atomically claim the oldest job with move-file (lock-free mutual exclusion — overlapping ticks never double-process), read it, run the receipt image through a local Ollama vision model, persist the extracted JSON to receipts/, notify the original sender on WhatsApp, then delete the job. Processes one receipt per tick for steady, effectively-serial throughput regardless of how fast photos arrive.",
+  "version": 1,
+  "variables": {
+    "model": "qwen2.5vl:3b",
+    "engineBaseUrl": "http://localhost:3001"
+  },
+  "layoutDirection": "TB",
+  "nodes": [
+    {
+      "id": "ls",
+      "type": "list-files",
+      "name": "List queue",
+      "description": "Enumerate queued jobs, oldest first → FIFO.",
+      "config": { "dir": "queue", "pattern": "*.json" },
+      "position": { "x": 0, "y": 0 }
+    },
+    {
+      "id": "any",
+      "type": "condition",
+      "name": "Any jobs?",
+      "config": { "expression": "outputs[\"ls\"].count > 0" },
+      "position": { "x": 0, "y": 140 }
+    },
+    {
+      "id": "claim",
+      "type": "move-file",
+      "name": "Claim oldest",
+      "description": "Atomic claim: move queue/<job> into processing/. moved:false means another tick already took it — lock-free.",
+      "config": {
+        "from": "{{outputs[\"ls\"].files[0].path}}",
+        "to": "processing/{{outputs[\"ls\"].files[0].name}}"
+      },
+      "position": { "x": 0, "y": 280 }
+    },
+    {
+      "id": "got",
+      "type": "condition",
+      "name": "Claimed?",
+      "config": { "expression": "outputs[\"claim\"].moved === true" },
+      "position": { "x": 0, "y": 420 }
+    },
+    {
+      "id": "read",
+      "type": "read-local-file",
+      "name": "Read job",
+      "config": {
+        "path": "{{outputs[\"claim\"].to}}",
+        "format": "json"
+      },
+      "position": { "x": 0, "y": 560 }
+    },
+    {
+      "id": "url",
+      "type": "transform",
+      "name": "Resolve image URL",
+      "description": "The job stores the bridge's CONTAINER path (/app/media/...), which the engine can't open. The engine serves the same file by basename at /media/<name>, and ollama-vision accepts an http(s) URL. So derive the basename and build a fetchable URL — works for old jobs (image/media path) and new ones (basename).",
+      "config": {
+        "code": "const c = outputs[\"read\"].content;\nconst raw = c.basename || c.image || (Array.isArray(c.media) ? c.media[0] : '') || '';\nconst base = String(raw).split(/[\\\\/]/).pop();\nif (!base) throw new Error('No receipt image path in job: ' + JSON.stringify(c));\nreturn { basename: base, imageUrl: variables.engineBaseUrl + '/media/' + base };"
+      },
+      "position": { "x": 0, "y": 700 }
+    },
+    {
+      "id": "vision",
+      "type": "ollama-vision",
+      "name": "Extract receipt",
+      "description": "Run the receipt photo through a local vision LLM and return structured JSON. Model is the {{variables.model}} workflow variable — swap it in one place. image is the engine's own /media URL; the node fetches and base64-encodes it.",
+      "timeoutSecs": 600,
+      "config": {
+        "model": "{{variables.model}}",
+        "image": "{{outputs[\"url\"].imageUrl}}",
+        "temperature": 0.1,
+        "system": "You are a precise receipt-OCR engine. Read the receipt image and return ONLY a single minified JSON object, no prose, no markdown fences.",
+        "prompt": "Extract these fields from this receipt photo. Use null when a field is not visible. Return strictly this JSON shape: {\"merchant\":string|null,\"date\":string|null,\"time\":string|null,\"currency\":string|null,\"total\":number|null,\"tax\":number|null,\"payment_method\":string|null,\"items\":[{\"name\":string,\"qty\":number|null,\"price\":number|null}]}"
+      },
+      "position": { "x": 0, "y": 840 }
+    },
+    {
+      "id": "persist",
+      "type": "write-file",
+      "name": "Save result",
+      "description": "Store the extracted receipt JSON under receipts/ for the next stage / bookkeeping.",
+      "config": {
+        "filename": "receipts/{{outputs[\"read\"].content.ts}}-{{outputs[\"read\"].content.uid}}.json",
+        "content": "{{outputs[\"vision\"].text}}",
+        "mimeType": "application/json"
+      },
+      "position": { "x": 0, "y": 980 }
+    },
+    {
+      "id": "notify",
+      "type": "send-whatsapp",
+      "name": "Notify sender",
+      "description": "Send the extracted details back to whoever sent the photo (stored in the job).",
+      "config": {
+        "to": "{{outputs[\"read\"].content.sender}}",
+        "text": "Receipt processed ✅\n{{outputs[\"vision\"].text}}"
+      },
+      "position": { "x": 0, "y": 1120 }
+    },
+    {
+      "id": "done",
+      "type": "delete-file",
+      "name": "Remove job",
+      "description": "Job complete — delete the claimed job file from processing/.",
+      "config": { "path": "{{outputs[\"claim\"].to}}" },
+      "position": { "x": 0, "y": 1260 }
+    },
+    {
+      "id": "idle",
+      "type": "log",
+      "name": "Queue empty",
+      "description": "Nothing to do this tick — terminate quietly.",
+      "config": {
+        "message": "Drainer tick: queue empty, nothing to process.",
+        "level": "info"
+      },
+      "position": { "x": 280, "y": 280 }
+    },
+    {
+      "id": "lost",
+      "type": "log",
+      "name": "Lost the claim",
+      "description": "Another overlapping tick already claimed this job — stop, it will process it.",
+      "config": {
+        "message": "Drainer tick: lost race for {{outputs[\"ls\"].files[0].name}} (claimed by another run). Stopping.",
+        "level": "info"
+      },
+      "position": { "x": 280, "y": 560 }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "ls", "to": "any" },
+    { "id": "e2", "from": "any", "to": "claim", "fromHandle": "true" },
+    { "id": "e3", "from": "claim", "to": "got" },
+    { "id": "e4", "from": "got", "to": "read", "fromHandle": "true" },
+    { "id": "e5", "from": "read", "to": "url" },
+    { "id": "e5b", "from": "url", "to": "vision" },
+    { "id": "e6", "from": "vision", "to": "persist" },
+    { "id": "e7", "from": "persist", "to": "notify" },
+    { "id": "e8", "from": "notify", "to": "done" },
+    { "id": "e9", "from": "any", "to": "idle", "fromHandle": "false" },
+    { "id": "e10", "from": "got", "to": "lost", "fromHandle": "false" }
+  ]
+}

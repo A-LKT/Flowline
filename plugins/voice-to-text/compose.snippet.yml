@@ -1,0 +1,27 @@
+# Add this service block to docker-compose.yml to enable the built-in voice-to-text service.
+# The transcribe-audio node calls POST ${VOICE_TO_TEXT_URL}/transcribe
+# with JSON body { "url": "<audio url>", "language": "<optional>" }
+# and expects { "text": "..." } in the response.
+#
+# Also add to the app service environment:
+#   VOICE_TO_TEXT_URL: "http://voice-to-text:9000"
+#   REGISTERED_SERVICES: (append voice-to-text entry — see example below)
+#
+# REGISTERED_SERVICES example with both WhatsApp Bridge and Voice-to-Text:
+#   '[{"name":"WhatsApp Bridge","url":"http://whatsapp-bridge:3002","healthPath":"/health"},{"name":"Voice to Text","url":"http://voice-to-text:9000","healthPath":"/health"}]'
+
+  voice-to-text:
+    build:
+      context: ./plugins/voice-to-text
+      dockerfile: Dockerfile
+    # ports:
+    #   - "9000:9000"   # uncomment to call the service from the host during dev
+    volumes:
+      - vtt_models:/root/.cache   # caches downloaded Whisper weights across restarts
+    environment:
+      WHISPER_MODEL: "${WHISPER_MODEL:-base}"   # tiny | base | small | medium | large-v2
+      WHISPER_LANG:  "${WHISPER_LANG:-}"        # leave empty for auto-detect
+    restart: unless-stopped
+
+# Add this to the top-level volumes block:
+#   vtt_models:

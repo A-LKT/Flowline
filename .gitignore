@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.local
+*.local
+wa-media/
+
+# Local Claude Code / editor settings — never publish.
+.claude/
+
+backend/data/*
+
+# License signing key — never commit (whoever holds it can mint premium licenses).
+# The real keys already live under backend/data/ (ignored above); this is a
+# belt-and-suspenders match for the private key placed anywhere.
+*-signing.private.pem
