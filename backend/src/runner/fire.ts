@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import * as db from '../db';
 import { pool } from './pool';
 import { loadSecrets } from './secrets';
@@ -34,7 +34,16 @@ export function fireWorkflowRun(
   const scripts = db.getAllScripts();
   const secrets = loadSecrets();
 
-  db.createRun({ id: runId, workflowId: wf.id, status: 'queued', triggerType: triggerType as RunTriggerType, triggerId, createdAt: Date.now(), workflowVersion: wf.version });
+  // Snapshot the exact graph this run executes against, content-addressed by
+  // hash, so run review can render the real canvas even after the workflow is
+  // edited. Written BEFORE createRun so a run row never exists without its
+  // snapshot (which would fool the orphan-snapshot cleaner). Idempotent: repeat
+  // runs of an unchanged graph reuse the one row.
+  const snapshotData = JSON.stringify(wf);
+  const snapshotHash = createHash('sha256').update(snapshotData).digest('hex');
+  db.saveWorkflowSnapshot(wf.id, snapshotHash, snapshotData);
+
+  db.createRun({ id: runId, workflowId: wf.id, status: 'queued', triggerType: triggerType as RunTriggerType, triggerId, createdAt: Date.now(), workflowVersion: wf.version, workflowSnapshotHash: snapshotHash });
 
   const stream = createRunStream(runId);
   let markedRunning = false;

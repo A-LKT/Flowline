@@ -106,6 +106,8 @@ export type Run = {
   finishedAt: number | null;
   createdAt: number;
   workflowVersion: number | null;
+  /** Content hash into workflow_snapshots — the exact graph this run executed. */
+  workflowSnapshotHash: string | null;
 };
 
 // ─── Triggers ────────────────────────────────────────────────────────────────

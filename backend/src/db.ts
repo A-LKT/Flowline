@@ -56,7 +56,29 @@ db.exec(`
 try { db.exec('ALTER TABLE runs ADD COLUMN workflow_version INTEGER'); } catch { /* already exists */ }
 try { db.exec("ALTER TABLE runs ADD COLUMN trigger_type TEXT NOT NULL DEFAULT 'manual'"); } catch { /* already exists */ }
 try { db.exec('ALTER TABLE runs ADD COLUMN trigger_id TEXT'); } catch { /* already exists */ }
+// Content hash of the workflow graph a run executed against — the pointer into
+// workflow_snapshots (below). Lets run review render the exact canvas that ran.
+try { db.exec('ALTER TABLE runs ADD COLUMN workflow_snapshot_hash TEXT'); } catch { /* already exists */ }
 db.exec('CREATE INDEX IF NOT EXISTS runs_trigger_id ON runs(trigger_id, created_at DESC)');
+// Powers the orphan-snapshot cleanup lookup (housekeeping) in O(1) per row.
+db.exec('CREATE INDEX IF NOT EXISTS runs_snapshot_hash ON runs(workflow_snapshot_hash)');
+
+// Content-addressed snapshots of the workflow graph as it existed when a run
+// fired. Keyed by (workflow_id, hash) so identical graphs across many runs/
+// versions collapse to one row — dedup that can never mis-resolve, unlike the
+// client-computed workflow.version (which imports/restores can reuse for
+// differing content). Correctness feature, so it lives in core (every edition
+// captures); the premium housekeeping plugin prunes rows no run references.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS workflow_snapshots (
+    workflow_id TEXT NOT NULL,
+    hash        TEXT NOT NULL,
+    data        TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    PRIMARY KEY (workflow_id, hash),
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+  );
+`);
 
 migrateDatastore(db);
 
@@ -123,8 +145,8 @@ const stmts = {
   getRun:       db.prepare('SELECT * FROM runs WHERE id = ?'),
   getRunsForWorkflow: db.prepare('SELECT * FROM runs WHERE workflow_id = ? ORDER BY created_at DESC LIMIT 20'),
   insertRun:    db.prepare(`
-    INSERT INTO runs (id, workflow_id, status, trigger_type, trigger_id, workflow_version, created_at)
-    VALUES (@id, @workflowId, @status, @triggerType, @triggerId, @workflowVersion, @createdAt)
+    INSERT INTO runs (id, workflow_id, status, trigger_type, trigger_id, workflow_version, workflow_snapshot_hash, created_at)
+    VALUES (@id, @workflowId, @status, @triggerType, @triggerId, @workflowVersion, @workflowSnapshotHash, @createdAt)
   `),
   lastRunForTrigger: db.prepare(`
     SELECT created_at FROM runs
@@ -210,6 +232,55 @@ const pruneDeprecatedStmt = db.prepare(`
     AND id NOT IN (SELECT DISTINCT workflow_id FROM runs)
 `);
 export const pruneOrphanedDeprecatedWorkflows = (): number => pruneDeprecatedStmt.run().changes;
+
+// ─── Workflow snapshots ───────────────────────────────────────────────────────
+// Content-addressed graph snapshots captured at run-fire time (see the table
+// definition above). saveWorkflowSnapshot is idempotent: an identical hash means
+// byte-identical data, so a repeat insert is a no-op.
+
+const insertSnapshotStmt = db.prepare(`
+  INSERT INTO workflow_snapshots (workflow_id, hash, data, created_at)
+  VALUES (@workflowId, @hash, @data, @createdAt)
+  ON CONFLICT(workflow_id, hash) DO NOTHING
+`);
+const getSnapshotStmt = db.prepare('SELECT data FROM workflow_snapshots WHERE workflow_id = ? AND hash = ?');
+// A snapshot is orphaned once no run points at it (runs are pruned by retention;
+// the graph they referenced then preserves nothing). Cascade already drops
+// snapshots when the workflow itself is hard-deleted.
+const pruneOrphanSnapshotsStmt = db.prepare(`
+  DELETE FROM workflow_snapshots
+  WHERE NOT EXISTS (
+    SELECT 1 FROM runs r
+    WHERE r.workflow_id = workflow_snapshots.workflow_id
+      AND r.workflow_snapshot_hash = workflow_snapshots.hash
+  )
+`);
+
+export const saveWorkflowSnapshot = (workflowId: string, hash: string, data: string): void => {
+  insertSnapshotStmt.run({ workflowId, hash, data, createdAt: Date.now() });
+};
+
+// Raw snapshot rows for backup export/import (bundled with runs — they're the
+// graphs those runs reference). `data` stays as stored JSON text (no re-parse).
+export type WorkflowSnapshotRow = { workflowId: string; hash: string; data: string; createdAt: number };
+
+const allSnapshotsStmt = db.prepare('SELECT workflow_id, hash, data, created_at FROM workflow_snapshots');
+export const getAllWorkflowSnapshots = (): WorkflowSnapshotRow[] =>
+  (allSnapshotsStmt.all() as { workflow_id: string; hash: string; data: string; created_at: number }[])
+    .map((r) => ({ workflowId: r.workflow_id, hash: r.hash, data: r.data, createdAt: r.created_at }));
+
+// Import a snapshot preserving its original created_at (unlike saveWorkflowSnapshot,
+// which stamps now). Idempotent; requires the referenced workflow to exist (FK).
+export const importWorkflowSnapshot = (row: WorkflowSnapshotRow): void => {
+  insertSnapshotStmt.run(row);
+};
+
+export const getWorkflowSnapshot = (workflowId: string, hash: string): Workflow | null => {
+  const row = getSnapshotStmt.get(workflowId, hash) as { data: string } | undefined;
+  return row ? (JSON.parse(row.data) as Workflow) : null;
+};
+
+export const pruneOrphanedSnapshots = (): number => pruneOrphanSnapshotsStmt.run().changes;
 
 // ─── Scripts ────────────────────────────────────────────────────────────────
 
@@ -298,6 +369,7 @@ type RunRow = {
   finished_at: number | null;
   created_at: number;
   workflow_version: number | null;
+  workflow_snapshot_hash: string | null;
 };
 
 const rowToRun = (row: RunRow): Run => ({
@@ -312,6 +384,7 @@ const rowToRun = (row: RunRow): Run => ({
   finishedAt: row.finished_at,
   createdAt: row.created_at,
   workflowVersion: row.workflow_version,
+  workflowSnapshotHash: row.workflow_snapshot_hash ?? null,
 });
 
 export const getRun = (id: string): Run | null => {
@@ -332,8 +405,8 @@ export const getRunByPrefix = (prefix: string): Run | null => {
 export const getRunsForWorkflow = (workflowId: string): Run[] =>
   (stmts.getRunsForWorkflow.all(workflowId) as RunRow[]).map(rowToRun);
 
-export const createRun = (run: Pick<Run, 'id' | 'workflowId' | 'status' | 'triggerType' | 'createdAt' | 'workflowVersion'> & { triggerId?: string | null }): void => {
-  stmts.insertRun.run({ id: run.id, workflowId: run.workflowId, status: run.status, triggerType: run.triggerType, triggerId: run.triggerId ?? null, workflowVersion: run.workflowVersion ?? null, createdAt: run.createdAt });
+export const createRun = (run: Pick<Run, 'id' | 'workflowId' | 'status' | 'triggerType' | 'createdAt' | 'workflowVersion'> & { triggerId?: string | null; workflowSnapshotHash?: string | null }): void => {
+  stmts.insertRun.run({ id: run.id, workflowId: run.workflowId, status: run.status, triggerType: run.triggerType, triggerId: run.triggerId ?? null, workflowVersion: run.workflowVersion ?? null, workflowSnapshotHash: run.workflowSnapshotHash ?? null, createdAt: run.createdAt });
 };
 
 export const getLastRunForTrigger = (triggerId: string): number | null => {
@@ -412,7 +485,7 @@ export const getAllRuns = (params: {
   if (params.until != null) { conditions.push('created_at <= ?'); bindings.push(params.until); }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   bindings.push(params.limit ?? 50, params.offset ?? 0);
-  const cols = 'id, workflow_id, status, trigger_type, trigger_id, started_at, finished_at, created_at, workflow_version'
+  const cols = 'id, workflow_id, status, trigger_type, trigger_id, started_at, finished_at, created_at, workflow_version, workflow_snapshot_hash'
     + (params.includeData ? ', results, logs' : '');
   return (db.prepare(`SELECT ${cols} FROM runs ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...bindings) as RunRow[]).map(rowToRun);
 };

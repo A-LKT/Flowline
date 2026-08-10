@@ -63,6 +63,7 @@ export type Run = {
   results: Record<string, NodeExecutionResult> | null;
   logs: string[] | null;
   workflowVersion: number | null;
+  workflowSnapshotHash?: string | null;
   startedAt: number | null;
   finishedAt: number | null;
   createdAt: number;

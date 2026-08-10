@@ -13,7 +13,7 @@ type Config = {
   lastRemovedRuns: number | null;
 };
 
-type RunResult = { removedRuns: number; removedWorkflows: number; vacuumed: boolean; ranAt: number };
+type RunResult = { removedRuns: number; removedWorkflows: number; removedSnapshots: number; vacuumed: boolean; ranAt: number };
 
 const PURGEABLE_STATUSES = ['success', 'error', 'cancelled'] as const;
 
@@ -154,6 +154,7 @@ export const HousekeepingPanel = () => {
           <span className="admin-import-count-badge">
             <Check size={11} strokeWidth={2.5} /> Removed {result.removedRuns} runs
             {result.removedWorkflows > 0 ? `, ${result.removedWorkflows} workflows` : ''}
+            {result.removedSnapshots > 0 ? `, ${result.removedSnapshots} snapshots` : ''}
             {result.vacuumed ? ' · disk reclaimed' : ''}
           </span>
         </div>

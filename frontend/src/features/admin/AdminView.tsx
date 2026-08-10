@@ -16,7 +16,7 @@ const ALL_SETS: { key: DataSet; label: string; desc: string }[] = [
   { key: 'workflows', label: 'Workflows',  desc: 'All workflow definitions and their node graphs' },
   { key: 'scripts',  label: 'Scripts',     desc: 'All saved scripts' },
   { key: 'triggers', label: 'Triggers',    desc: 'All scheduled and webhook triggers' },
-  { key: 'runs',     label: 'Job runs',    desc: 'Full run history with logs and results' },
+  { key: 'runs',     label: 'Job runs',    desc: 'Full run history with logs, results, and the canvas each run executed' },
   { key: 'secrets',  label: 'Secrets',     desc: 'Encrypted vault secrets (plaintext in file!)' },
 ];
 

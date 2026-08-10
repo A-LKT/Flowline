@@ -19,8 +19,23 @@
     volumes:
       - vtt_models:/root/.cache   # caches downloaded Whisper weights across restarts
     environment:
-      WHISPER_MODEL: "${WHISPER_MODEL:-base}"   # tiny | base | small | medium | large-v2
-      WHISPER_LANG:  "${WHISPER_LANG:-}"        # leave empty for auto-detect
+      WHISPER_MODEL: "${WHISPER_MODEL:-base}"   # tiny | base | small | medium | large-v3
+      WHISPER_LANG:  "${WHISPER_LANG:-}"        # leave empty for auto-detect; e.g. "pl"
+      # --- Hardware (defaults to CPU; no GPU required) ---
+      WHISPER_DEVICE:       "${WHISPER_DEVICE:-cpu}"          # cpu | cuda
+      WHISPER_COMPUTE_TYPE: "${WHISPER_COMPUTE_TYPE:-}"       # blank = float16 on cuda, int8 on cpu
+      # CPU-only speedups on a multi-core host:
+      WHISPER_CPU_THREADS:  "${WHISPER_CPU_THREADS:-0}"       # 0 = auto; set to physical core count
+      WHISPER_BEAM_SIZE:    "${WHISPER_BEAM_SIZE:-5}"         # drop to 1 on CPU for a big speedup
+    # --- NVIDIA GPU (uncomment to run Whisper on the GPU; set WHISPER_DEVICE=cuda) ---
+    # Needs the NVIDIA Container Toolkit (Docker Desktop provides it on WSL2).
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
     restart: unless-stopped
 
 # Add this to the top-level volumes block:

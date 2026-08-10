@@ -25,6 +25,7 @@ export function useRunReplay(workflow: Workflow | undefined): ReplayController {
   const addLog                = useWorkflowStore((s) => s.addLog);
   const resetExecution        = useWorkflowStore((s) => s.resetExecution);
   const setReplayRunId        = useWorkflowStore((s) => s.setReplayRunId);
+  const setReviewSnapshot     = useWorkflowStore((s) => s.setReviewSnapshot);
 
   const sseRef = useRef<EventSource | null>(null);
   const [streaming, setStreaming] = useState(false);
@@ -34,6 +35,7 @@ export function useRunReplay(workflow: Workflow | undefined): ReplayController {
     sseRef.current = null;
     setStreaming(false);
     setReplayRunId(null);
+    setReviewSnapshot(null);
     resetExecution();
   };
 
@@ -43,7 +45,20 @@ export function useRunReplay(workflow: Workflow | undefined): ReplayController {
     sseRef.current = null;
     resetExecution();
     setReplayRunId(runId);
+    setReviewSnapshot(null);
     setStreaming(true);
+
+    // Fetch the graph as it ran so the canvas shows the real historical version,
+    // not the live (possibly since-edited) one. 404 → no snapshot (pre-feature or
+    // pruned run); leave null so the panel falls back to the mismatch warning.
+    // Guard against a fast run-switch: only apply if this run is still the one
+    // being reviewed when the fetch resolves.
+    void fetch(`/runs/${runId}/workflow-snapshot`)
+      .then((r) => (r.ok ? r.json() as Promise<Workflow> : null))
+      .then((snap) => {
+        if (useWorkflowStore.getState().replayRunId === runId) setReviewSnapshot(snap);
+      })
+      .catch(() => { /* keep null — fall back to the warning */ });
 
     let hasNodeEvents = false;
     const sse = new EventSource(`/runs/${runId}/events`);

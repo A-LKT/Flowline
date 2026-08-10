@@ -40,6 +40,11 @@ export const RunReviewPanel = ({ runId, workflow, selectedNodeId, streaming, onC
   const logs      = useWorkflowStore((s) => s.execution.logs);
   const focusNode = useWorkflowStore((s) => s.focusNode);
   const isDirty   = useWorkflowStore((s) => s.isDirty);
+  const snapshot  = useWorkflowStore((s) => s.reviewSnapshot);
+
+  // The canvas renders the snapshot when we have one, so node lookups (names,
+  // "removed" tags) must read from the same graph, or they'd disagree with it.
+  const graph = snapshot ?? workflow;
 
   const [tab, setTab]           = useState<Tab>('nodes');
   const [logsOnly, setLogsOnly] = useState(false);
@@ -69,7 +74,7 @@ export const RunReviewPanel = ({ runId, workflow, selectedNodeId, streaming, onC
     }
   }, [logs, tab]);
 
-  const known = new Set(workflow.nodes.map((n) => n.id));
+  const known = new Set(graph.nodes.map((n) => n.id));
   const timeline = Object.values(results)
     .filter((r) => r.status !== 'idle')
     .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
@@ -78,7 +83,7 @@ export const RunReviewPanel = ({ runId, workflow, selectedNodeId, streaming, onC
     run?.workflowVersion != null && run.workflowVersion !== workflow.version;
 
   const nodeName = (nodeId: string): string => {
-    const n = workflow.nodes.find((x) => x.id === nodeId);
+    const n = graph.nodes.find((x) => x.id === nodeId);
     return n?.name ?? n?.type ?? nodeId;
   };
 
@@ -104,7 +109,15 @@ export const RunReviewPanel = ({ runId, workflow, selectedNodeId, streaming, onC
         </div>
       </div>
 
-      {isDirty ? (
+      {snapshot ? (
+        // Canvas is the captured graph — accurate to the run. Only flag it when it
+        // differs from the live workflow, as an informational note (not a warning).
+        versionMismatch && (
+          <div className="run-review-note">
+            ℹ Showing workflow v{run!.workflowVersion} as it ran (current is v{workflow.version}).
+          </div>
+        )
+      ) : isDirty ? (
         <div className="run-review-warning">
           ⚠ This workflow has unsaved edits — the canvas does not match what actually executed.
           Node results below are accurate to the run.

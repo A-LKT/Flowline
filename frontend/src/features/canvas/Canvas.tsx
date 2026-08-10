@@ -135,8 +135,15 @@ let moduleClipboard: Clipboard = { nodes: [], edges: [] };
 export const Canvas = ({ onSelectionChange, layoutDirection, reviewing = false }: Props) => {
   const showNodeTiming   = useSettingsStore((s) => s.showNodeTiming);
   const activeWorkflowId = useWorkflowStore((s) => s.activeWorkflowId);
-  const wfNodes        = useWorkflowStore((s) => s.workflows.find((w) => w.id === s.activeWorkflowId)?.nodes ?? []);
-  const wfEdges        = useWorkflowStore((s) => s.workflows.find((w) => w.id === s.activeWorkflowId)?.edges ?? []);
+  // While reviewing a run, render the run's captured graph (if we have it) rather
+  // than the live workflow, so the canvas matches what actually executed. The
+  // canvas is read-only in review mode, so a snapshot here is never persisted.
+  const reviewSnapshot = useWorkflowStore((s) => s.reviewSnapshot);
+  const useSnapshot    = reviewing && !!reviewSnapshot;
+  const liveNodes      = useWorkflowStore((s) => s.workflows.find((w) => w.id === s.activeWorkflowId)?.nodes ?? []);
+  const liveEdges      = useWorkflowStore((s) => s.workflows.find((w) => w.id === s.activeWorkflowId)?.edges ?? []);
+  const wfNodes        = useSnapshot ? reviewSnapshot!.nodes : liveNodes;
+  const wfEdges        = useSnapshot ? reviewSnapshot!.edges : liveEdges;
   const execution      = useWorkflowStore((s) => s.execution);
   const snapshotHistory = useWorkflowStore((s) => s.snapshotHistory);
   const moveNodeSilent  = useWorkflowStore((s) => s.moveNodeSilent);

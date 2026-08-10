@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { db, getAllWorkflows, getAllScripts, getAllTriggers, getAllRuns, getAllSecretsEncrypted, upsertWorkflow, upsertScript, upsertTrigger, setSecret } from '../db';
+import { db, getAllWorkflows, getAllScripts, getAllTriggers, getAllRuns, getAllSecretsEncrypted, getAllWorkflowSnapshots, importWorkflowSnapshot, upsertWorkflow, upsertScript, upsertTrigger, setSecret, type WorkflowSnapshotRow } from '../db';
 import { encrypt, decrypt, isVaultKeySet } from '../crypto';
 import { sanitizeResults } from '../runner/sanitizeResults';
 import { isExecutionPaused, setExecutionPaused } from '../executionState';
@@ -10,6 +10,9 @@ type BackupData = {
   scripts?:   Script[];
   triggers?:  Trigger[];
   runs?:      Run[];
+  // Captured run canvases, bundled with runs (same 'runs' include). Restored runs
+  // without these fall back to the version-mismatch warning.
+  snapshots?: WorkflowSnapshotRow[];
   secrets?:   { name: string; value: string }[];
 };
 
@@ -49,6 +52,8 @@ export const adminRoutes = async (app: FastifyInstance) => {
       data.runs = getAllRuns({ limit: 999999, offset: 0, includeData: true }).map((r) =>
         r.results ? { ...r, results: sanitizeResults(r.results) } : r,
       );
+      // Bundle the run canvases so restored runs can still show the graph that ran.
+      data.snapshots = getAllWorkflowSnapshots();
     }
 
     if (parts.has('secrets')) {
@@ -102,28 +107,40 @@ export const adminRoutes = async (app: FastifyInstance) => {
       counts.triggers = n;
     }
 
+    // Run canvases travel with runs (same 'runs' include). Import them first so a
+    // restored run's snapshot is present; each requires its workflow to exist (FK),
+    // and skips (with an error) otherwise — same contract as runs themselves.
+    if (parts.has('runs') && Array.isArray(backup.data.snapshots)) {
+      let n = 0;
+      for (const snap of backup.data.snapshots as WorkflowSnapshotRow[]) {
+        try { importWorkflowSnapshot(snap); n++; } catch (e) { errors.push(`snapshot ${snap.hash?.slice(0, 12)}: ${String(e)}`); }
+      }
+      counts.snapshots = n;
+    }
+
     if (parts.has('runs') && Array.isArray(backup.data.runs)) {
       const stmt = db.prepare(`
         INSERT OR IGNORE INTO runs
-          (id, workflow_id, status, results, logs, started_at, finished_at, created_at, workflow_version, trigger_type, trigger_id)
+          (id, workflow_id, status, results, logs, started_at, finished_at, created_at, workflow_version, workflow_snapshot_hash, trigger_type, trigger_id)
         VALUES
-          (@id, @workflowId, @status, @results, @logs, @startedAt, @finishedAt, @createdAt, @workflowVersion, @triggerType, @triggerId)
+          (@id, @workflowId, @status, @results, @logs, @startedAt, @finishedAt, @createdAt, @workflowVersion, @workflowSnapshotHash, @triggerType, @triggerId)
       `);
       let n = 0;
       for (const run of backup.data.runs as Run[]) {
         try {
           stmt.run({
-            id:              run.id,
-            workflowId:      run.workflowId,
-            status:          run.status,
-            results:         run.results ? JSON.stringify(run.results) : null,
-            logs:            run.logs    ? JSON.stringify(run.logs)    : null,
-            startedAt:       run.startedAt   ?? null,
-            finishedAt:      run.finishedAt  ?? null,
-            createdAt:       run.createdAt,
-            workflowVersion: run.workflowVersion ?? null,
-            triggerType:     run.triggerType ?? 'manual',
-            triggerId:       run.triggerId ?? null,
+            id:                  run.id,
+            workflowId:          run.workflowId,
+            status:              run.status,
+            results:             run.results ? JSON.stringify(run.results) : null,
+            logs:                run.logs    ? JSON.stringify(run.logs)    : null,
+            startedAt:           run.startedAt   ?? null,
+            finishedAt:          run.finishedAt  ?? null,
+            createdAt:           run.createdAt,
+            workflowVersion:     run.workflowVersion ?? null,
+            workflowSnapshotHash: run.workflowSnapshotHash ?? null,
+            triggerType:         run.triggerType ?? 'manual',
+            triggerId:           run.triggerId ?? null,
           });
           n++;
         } catch (e) { errors.push(`run ${run.id}: ${String(e)}`); }

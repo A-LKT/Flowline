@@ -115,6 +115,13 @@ type WorkflowStore = {
   // Currently-replaying run (null when not viewing a past job)
   replayRunId: string | null;
   setReplayRunId: (id: string | null) => void;
+
+  // The workflow graph as it existed when the reviewed run fired, fetched from
+  // /runs/:id/workflow-snapshot. When set, the review canvas renders THIS instead
+  // of the live (possibly since-edited) workflow. Null when reviewing a run that
+  // predates snapshotting, or when not reviewing.
+  reviewSnapshot: Workflow | null;
+  setReviewSnapshot: (wf: Workflow | null) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -155,6 +162,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => {
     isLoading: false,
     backendOffline: false,
     replayRunId: null,
+    reviewSnapshot: null,
 
     // --- Collection ---
 
@@ -251,7 +259,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => {
     setActiveWorkflow: (id) =>
       // Also drop any in-progress run review — a replay belongs to the workflow
       // it was opened from, so switching workflows must exit review mode.
-      set({ activeWorkflowId: id, past: [], future: [], execution: { ...EMPTY_EXECUTION }, replayRunId: null }),
+      set({ activeWorkflowId: id, past: [], future: [], execution: { ...EMPTY_EXECUTION }, replayRunId: null, reviewSnapshot: null }),
 
     saveWorkflows: async () => {
       const { workflows, activeWorkflowId } = get();
@@ -402,5 +410,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => {
     focusNode: (id) => set({ focusedNodeId: id }),
 
     setReplayRunId: (id) => set({ replayRunId: id }),
+
+    setReviewSnapshot: (wf) => set({ reviewSnapshot: wf }),
   };
 });

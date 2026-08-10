@@ -1,9 +1,10 @@
-import { db, pruneOrphanedDeprecatedWorkflows } from '../../db';
+import { db, pruneOrphanedDeprecatedWorkflows, pruneOrphanedSnapshots } from '../../db';
 import { getConfig, saveConfig, type HousekeepingConfig } from './config';
 
 export type HousekeepingResult = {
   removedRuns: number;
   removedWorkflows: number;
+  removedSnapshots: number;
   vacuumed: boolean;
   ranAt: number;
 };
@@ -46,13 +47,20 @@ export function runHousekeeping(cfg: HousekeepingConfig = getConfig()): Housekee
   });
   tx();
 
-  // 3) Drop deprecated workflows whose runs are now all gone (they preserve
+  // 3) Drop workflow snapshots no surviving run references. Must come after the
+  //    run-deletion transaction (which orphans them) but BEFORE the deprecated-
+  //    workflow prune below — that prune's FK cascade would otherwise delete these
+  //    same rows first, making this count read low. Always on: it's pure garbage
+  //    collection of graphs nothing can display any more.
+  const removedSnapshots = pruneOrphanedSnapshots();
+
+  // 4) Drop deprecated workflows whose runs are now all gone (they preserve
   //    nothing once history is pruned). Uses the existing retention companion.
   const removedWorkflows = cfg.pruneDeprecated ? pruneOrphanedDeprecatedWorkflows() : 0;
 
-  // 4) Reclaim disk if asked. VACUUM cannot run inside a transaction.
+  // 5) Reclaim disk if asked. VACUUM cannot run inside a transaction.
   let vacuumed = false;
-  if (cfg.vacuum && (removedRuns > 0 || removedWorkflows > 0)) {
+  if (cfg.vacuum && (removedRuns > 0 || removedWorkflows > 0 || removedSnapshots > 0)) {
     db.exec('VACUUM');
     vacuumed = true;
   }
@@ -60,7 +68,7 @@ export function runHousekeeping(cfg: HousekeepingConfig = getConfig()): Housekee
   const ranAt = Date.now();
   saveConfig({ ...cfg, lastRunAt: ranAt, lastRemovedRuns: removedRuns });
 
-  return { removedRuns, removedWorkflows, vacuumed, ranAt };
+  return { removedRuns, removedWorkflows, removedSnapshots, vacuumed, ranAt };
 }
 
 // ─── Scheduler ────────────────────────────────────────────────────────────────

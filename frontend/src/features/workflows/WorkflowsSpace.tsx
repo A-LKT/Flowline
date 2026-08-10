@@ -13,6 +13,7 @@ import { useWorkflowStore } from '../../state/workflowStore';
 import { useEditionStore } from '../../state/editionStore';
 import { navigate, navigateReplace, registerNavigationBlocker, formatRoute, type Route } from '../../state/route';
 import { APP_VERSION } from '../../version';
+import type { NodeExecutionResult } from '../../types/workflow';
 
 type Props = {
   /** #/workflows/<id> — open this workflow for editing. */
@@ -53,9 +54,14 @@ export const WorkflowsSpace = ({ workflowId, reviewRunId, onHome }: Props) => {
   const activeWorkflow      = useWorkflowStore((s) => s.workflows.find((w) => w.id === s.activeWorkflowId));
   const undo                = useWorkflowStore((s) => s.undo);
   const redo             = useWorkflowStore((s) => s.redo);
+  const reviewSnapshot   = useWorkflowStore((s) => s.reviewSnapshot);
+  // While reviewing with a captured graph, the canvas renders the snapshot — so
+  // its layout direction (handle/edge orientation) must come from the snapshot,
+  // not the live workflow which may since have been toggled.
   const layoutDirection  = useWorkflowStore(
     (s) => s.workflows.find((w) => w.id === s.activeWorkflowId)?.layoutDirection ?? 'TB',
   );
+  const effectiveLayoutDirection = reviewSnapshot?.layoutDirection ?? layoutDirection;
   const setLayoutDirection = useWorkflowStore((s) => s.setLayoutDirection);
   const applyAutoLayout    = useWorkflowStore((s) => s.applyAutoLayout);
   const isDirty            = useWorkflowStore((s) => s.isDirty);
@@ -100,12 +106,20 @@ export const WorkflowsSpace = ({ workflowId, reviewRunId, onHome }: Props) => {
   const focusNode   = useWorkflowStore((s) => s.focusNode);
   const execResults = useWorkflowStore((s) => s.execution.results);
 
-  // On opening a run, zoom the canvas to the node that executed first (earliest
-  // startedAt; junction nodes record 0 and are skipped). Fire once per reviewed
-  // run — after results populate — so a live run's SSE stream can't re-zoom.
-  // Defer the focus a beat so the ReactFlow instance has mounted and the nodes
-  // have been measured; firing immediately runs fitView against unmeasured
-  // geometry and the zoom silently no-ops.
+  // On opening a run, zoom the canvas to whatever the reviewer most needs to see:
+  // the node currently running (live run) or, failing that, the first node that
+  // failed. Only when nothing is running or errored do we fall back to the node
+  // that executed first. Prefer the earliest startedAt within each tier so ties
+  // resolve to the head of the run (junction nodes record 0 and are skipped).
+  //
+  // The decision is debounced, not taken on the first result: replay streams a
+  // live run's history as a burst (node:start → node:complete → node:start …),
+  // so picking on the first event would lock onto whichever node started first —
+  // which is momentarily 'running' before its own :complete lands a tick later.
+  // Rescheduling on every result update lets the burst settle, then we read the
+  // latest store state so the genuinely-running node wins. The debounce also
+  // defers the focus past mount so ReactFlow has measured the nodes (fitView
+  // against unmeasured geometry silently no-ops). Fires once per reviewed run.
   const focusedRunRef = useRef<string | null>(null);
   const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -116,14 +130,27 @@ export const WorkflowsSpace = ({ workflowId, reviewRunId, onHome }: Props) => {
       if (focusTimerRef.current) { clearTimeout(focusTimerRef.current); focusTimerRef.current = null; }
       return;
     }
-    if (focusedRunRef.current === replayRunId) return; // already scheduled for this run
+    if (focusedRunRef.current === replayRunId) return; // already focused this run
     const started = Object.values(execResults).filter((r) => (r.startedAt ?? 0) > 0);
     if (started.length === 0) return;                  // wait for results to arrive
-    const start = started.reduce((a, b) => (a.startedAt <= b.startedAt ? a : b));
-    // Mark handled before scheduling so later execResults updates don't reschedule
-    // or (via a cleanup) cancel this timer — the focus must survive result merges.
-    focusedRunRef.current = replayRunId;
-    focusTimerRef.current = setTimeout(() => { focusNode(start.nodeId); focusTimerRef.current = null; }, 300);
+    // Reschedule on each update so the timer only fires once the stream is quiet.
+    if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+    focusTimerRef.current = setTimeout(() => {
+      focusTimerRef.current = null;
+      if (focusedRunRef.current === replayRunId) return;
+      const settled = Object.values(useWorkflowStore.getState().execution.results)
+        .filter((r) => (r.startedAt ?? 0) > 0);
+      if (settled.length === 0) return;
+      const earliest = (rs: NodeExecutionResult[]) => rs.reduce((a, b) => (a.startedAt <= b.startedAt ? a : b));
+      const running = settled.filter((r) => r.status === 'running');
+      const failed  = settled.filter((r) => r.status === 'error');
+      const target =
+        running.length ? earliest(running) :
+        failed.length  ? earliest(failed)  :
+        earliest(settled);
+      focusedRunRef.current = replayRunId;
+      focusNode(target.nodeId);
+    }, 400);
   }, [reviewing, replayRunId, execResults, focusNode]);
   useEffect(() => () => { if (focusTimerRef.current) clearTimeout(focusTimerRef.current); }, []);
 
@@ -387,7 +414,7 @@ export const WorkflowsSpace = ({ workflowId, reviewRunId, onHome }: Props) => {
           <div className="canvas-wrap" ref={canvasWrapRef}>
             <Canvas
               onSelectionChange={handleSelectionChange}
-              layoutDirection={layoutDirection}
+              layoutDirection={effectiveLayoutDirection}
               reviewing={reviewing}
             />
           </div>

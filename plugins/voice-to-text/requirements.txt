@@ -1,3 +1,11 @@
-faster-whisper
+# Pinned to a set validated on an NVIDIA RTX 50-series (Blackwell, sm_120) GPU:
+# ctranslate2 4.8.1 ships sm_120 kernels; the cudnn 9 / cublas 12 wheels supply
+# the CUDA runtime libs (see LD_LIBRARY_PATH in the Dockerfile). These nvidia-*
+# wheels are only used when WHISPER_DEVICE=cuda; they're inert on the CPU path.
+faster-whisper==1.2.1
+ctranslate2==4.8.1
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cudnn-cu12==9.24.0.43
+nvidia-cuda-nvrtc-cu12==12.9.86
 fastapi
 uvicorn[standard]

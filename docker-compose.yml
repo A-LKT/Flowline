@@ -52,12 +52,22 @@ services:
       context: ./plugins/voice-to-text
       dockerfile: Dockerfile
     ports:
-      - "9000:9000"
+      - "9000:9000"   # host-run backend reaches the service via this mapping
     volumes:
       - vtt_models:/root/.cache
     environment:
-      WHISPER_MODEL: "${WHISPER_MODEL:-base}"
-      WHISPER_LANG:  "${WHISPER_LANG:-}"
+      WHISPER_MODEL:        "${WHISPER_MODEL:-large-v3}"   # GPU can afford the accurate multilingual model
+      WHISPER_LANG:         "${WHISPER_LANG:-pl}"          # skip auto-detect for Polish channels
+      WHISPER_DEVICE:       "${WHISPER_DEVICE:-cuda}"      # cuda | cpu
+      WHISPER_COMPUTE_TYPE: "${WHISPER_COMPUTE_TYPE:-float16}"
+    # GPU passthrough (NVIDIA Container Toolkit / Docker Desktop WSL2 GPU).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped
 
 volumes:

@@ -62,6 +62,19 @@ export const runRoutes = async (app: FastifyInstance) => {
     return run;
   });
 
+  // GET /runs/:id/workflow-snapshot — the workflow graph as it existed when this
+  // run fired. Lets run review render the historical canvas instead of the live
+  // (possibly since-edited) workflow. 404 when the run predates snapshotting or
+  // the snapshot was pruned by housekeeping — the client falls back to a warning.
+  app.get<{ Params: { id: string } }>('/runs/:id/workflow-snapshot', async (req, reply) => {
+    const run = db.getRun(req.params.id);
+    if (!run) return reply.code(404).send({ error: 'Run not found' });
+    if (!run.workflowSnapshotHash) return reply.code(404).send({ error: 'No snapshot for this run' });
+    const snapshot = db.getWorkflowSnapshot(run.workflowId, run.workflowSnapshotHash);
+    if (!snapshot) return reply.code(404).send({ error: 'Snapshot not found' });
+    return snapshot;
+  });
+
   // GET /runs/:id/events — SSE stream of execution events
   app.get<{ Params: { id: string } }>('/runs/:id/events', async (req, reply) => {
     const { id } = req.params;

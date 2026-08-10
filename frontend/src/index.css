@@ -681,6 +681,16 @@ body {
   flex-shrink: 0;
 }
 
+.run-review-note {
+  padding: 6px 12px;
+  background: var(--surface2, rgba(127, 127, 127, 0.08));
+  border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.2));
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text2);
+  flex-shrink: 0;
+}
+
 .run-review-tabs { margin: 0; padding: 0 12px; }
 
 .run-review-nodes {
