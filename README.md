@@ -1,4 +1,6 @@
-# Flowline
+<p align="center">
+  <img src="logo.svg" alt="Flowline" width="440">
+</p>
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-22-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org)
@@ -49,8 +51,72 @@ cd backend && npm install && npm run dev
 cd frontend && npm install && npm run dev
 ```
 
-Tests and build: `cd backend && npm test && npm run build`, and
-`cd frontend && npm run build`.
+Copy `.env.example` to `.env` first — both `npm run dev` and Docker Compose read
+it for `WEBHOOK_SECRET`, optional `API_TOKEN`, sidecar URLs, and the premium
+license key.
+
+## Building
+
+Each package builds independently. Node 22 is required (the backend compiles the
+native `better-sqlite3` addon).
+
+```bash
+# backend → TypeScript compiled to backend/dist
+cd backend && npm install && npm run build
+
+# frontend → static bundle in frontend/dist
+cd frontend && npm install && npm run build
+```
+
+Run the backend test suite (and lint the frontend) before shipping:
+
+```bash
+cd backend && npm test
+cd frontend && npm run lint
+```
+
+The production Docker image performs both builds in separate stages and copies
+the frontend bundle into the backend's `public/` directory, so a single `app`
+container serves the API and the UI together.
+
+## Deployment
+
+The supported deployment path is Docker Compose. It builds three services from
+this repo — `app` (API + frontend), `whatsapp-bridge`, and `voice-to-text` — and
+provisions the persistent volumes.
+
+```bash
+git clone <your-repo-url> flowline && cd flowline
+cp .env.example .env       # set WEBHOOK_SECRET and API_TOKEN at minimum
+docker compose up --build -d
+```
+
+Then open **http://localhost:3001**.
+
+**Before exposing an instance publicly:**
+
+- **Set `API_TOKEN`.** Uncomment it in `.env` / `docker-compose.yml`. Without it,
+  anyone who can reach port 3001 can read workflows, run them, and export
+  decrypted secrets.
+- **Set `WEBHOOK_SECRET`** and use the same value in every webhook trigger in the
+  UI and in the WhatsApp bridge.
+- **Set `CORS_ORIGIN`** if the UI is served from a different origin (otherwise
+  requests are same-origin only).
+- **Put a TLS-terminating reverse proxy** (nginx, Caddy, Traefik) in front of
+  port 3001; the app speaks plain HTTP.
+
+**Persistent state** lives in named volumes — the SQLite DB, files, and
+license/instance state in `workflow_data` (mounted at `/app/data`), WhatsApp auth
+in `wa_auth`, and Whisper models in `vtt_models`. Back up `workflow_data`
+regularly; see the "Admin & Backup" section of [DOCS.md](DOCS.md).
+
+**GPU note:** the `voice-to-text` service requests an NVIDIA GPU (needs the NVIDIA
+Container Toolkit). To run Whisper on CPU, set `WHISPER_DEVICE=cpu` in `.env` and
+remove the `deploy.resources` block from that service in `docker-compose.yml`.
+
+**Updating:** pull the latest changes and rebuild — `git pull && docker compose up
+--build -d`. Schema migrations run automatically on startup; the data volume is
+preserved across rebuilds.
 
 ## Editions & licensing
 

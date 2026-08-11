@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 140" width="520" height="140" role="img" aria-label="Flowline">
+  <!-- Card background (keeps the mark legible on both light and dark READMEs) -->
+  <rect width="520" height="140" rx="20" fill="#0d1117"/>
+
+  <!-- ── Node mark (scaled-up favicon) ────────────────────────────── -->
+  <g transform="translate(40 34)">
+    <!-- connecting track -->
+    <line x1="4" y1="36" x2="68" y2="36" stroke="#30363d" stroke-width="4"/>
+
+    <!-- three wired nodes -->
+    <rect x="0"  y="24" width="20" height="24" rx="5" fill="#388bfd" opacity="0.95"/>
+    <rect x="26" y="24" width="20" height="24" rx="5" fill="#a371f7" opacity="0.95"/>
+    <rect x="52" y="24" width="20" height="24" rx="5" fill="#3fb950" opacity="0.95"/>
+
+    <!-- flow chevrons -->
+    <polyline points="20,31 26,36 20,41" fill="none" stroke="#e6edf3" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <polyline points="46,31 52,36 46,41" fill="none" stroke="#e6edf3" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+
+  <!-- ── Wordmark ─────────────────────────────────────────────────── -->
+  <g transform="translate(150 0)">
+    <text x="0" y="80"
+          font-family="'Segoe UI', 'Helvetica Neue', Arial, system-ui, sans-serif"
+          font-size="48" font-weight="700" letter-spacing="-0.5"
+          fill="#e6edf3">Flow<tspan fill="#388bfd">line</tspan></text>
+    <text x="2" y="106"
+          font-family="'Segoe UI', 'Helvetica Neue', Arial, system-ui, sans-serif"
+          font-size="15" font-weight="400" letter-spacing="2.5"
+          fill="#8b949e">VISUAL WORKFLOW AUTOMATION</text>
+  </g>
+</svg>
