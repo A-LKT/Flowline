@@ -2,9 +2,11 @@
   <img src="logo.svg" alt="Flowline" width="440">
 </p>
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/Node-22-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg?logo=docker&logoColor=white)](docker-compose.yml)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node-22-339933.svg?logo=node.js&logoColor=white" alt="Node"></a>
+  <a href="docker-compose.yml"><img src="https://img.shields.io/badge/Docker-Compose-2496ED.svg?logo=docker&logoColor=white" alt="Docker"></a>
+</p>
 
 A visual, node-based automation platform for building, running, and monitoring
 multi-step workflows. Wire together reusable **nodes** on a drag-and-drop canvas —
