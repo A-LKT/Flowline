@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PipelineIcon } from './PipelineIcon';
-import { checkAuth, getApiToken, setApiToken } from '../utils/apiAuth';
+import { checkAuth, login, setUnauthorizedHandler } from '../utils/apiAuth';
+import { useAuthStore } from '../state/authStore';
 import { useWorkflowStore } from '../state/workflowStore';
 import { useScriptStore } from '../state/scriptStore';
 import { useTriggerStore } from '../state/triggerStore';
@@ -8,22 +9,26 @@ import App from '../App';
 
 type GateState = 'checking' | 'locked' | 'ready';
 
-// Blocks the app until the backend accepts our API token (or reports that no
-// token is required), then loads persisted data and renders the app proper.
+// Blocks the app until the backend confirms an authenticated session, then loads
+// persisted data and renders the app proper. On login the backend sets an httpOnly
+// session cookie; a mid-session 401 (expiry/revocation) bounces back here.
 export function AuthGate() {
   const [state, setState] = useState<GateState>('checking');
-  const [tokenInput, setTokenInput] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const loadedRef = useRef(false);
+  const setUser = useAuthStore((s) => s.setUser);
 
-  const attempt = useCallback(async (fromSubmit: boolean) => {
+  const attempt = useCallback(async () => {
     setState('checking');
-    const status = await checkAuth();
-    if (status === 'unauthorized') {
-      setError(fromSubmit ? 'That token was rejected — check it and try again.' : getApiToken() ? 'Stored token was rejected — it may have changed.' : '');
+    const result = await checkAuth();
+    if (result.status === 'unauthorized') {
       setState('locked');
       return;
     }
+    if (result.status === 'ok') setUser(result.user);
     // 'ok', or 'offline' — proceed either way; the stores handle offline state.
     if (!loadedRef.current) {
       loadedRef.current = true;
@@ -34,9 +39,21 @@ export function AuthGate() {
       ]);
     }
     setState('ready');
+  }, [setUser]);
+
+  // A 401 anywhere in the app (expired/revoked session) sends us back to login.
+  // Only show the "expired" note if we had actually loaded in — a first-time
+  // visitor who was never authenticated shouldn't see a spurious expiry message.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      const wasAuthed = loadedRef.current;
+      loadedRef.current = false;
+      if (wasAuthed) setError('Your session expired — please sign in again.');
+      setState('locked');
+    });
   }, []);
 
-  useEffect(() => { void attempt(false); }, [attempt]);
+  useEffect(() => { void attempt(); }, [attempt]);
 
   if (state === 'ready') return <App />;
 
@@ -48,12 +65,20 @@ export function AuthGate() {
     );
   }
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const t = tokenInput.trim();
-    if (!t) return;
-    setApiToken(t);
-    void attempt(true);
+    const u = username.trim();
+    if (!u || !password || submitting) return;
+    setSubmitting(true);
+    setError('');
+    const res = await login(u, password);
+    setSubmitting(false);
+    if (!res.ok) {
+      setPassword('');
+      setError(res.error);
+      return;
+    }
+    await attempt();
   };
 
   return (
@@ -71,19 +96,28 @@ export function AuthGate() {
           <PipelineIcon size={18} /> Flowline
         </div>
         <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text2)' }}>
-          This server requires an API token (the <code>API_TOKEN</code> value from the server environment).
+          Sign in to continue.
         </p>
         <input
           className="field-input"
-          type="password"
+          type="text"
           autoFocus
-          placeholder="API token"
-          value={tokenInput}
-          onChange={(e) => setTokenInput(e.target.value)}
+          autoComplete="username"
+          placeholder="Username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+        />
+        <input
+          className="field-input"
+          type="password"
+          autoComplete="current-password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
         />
         {error && <div style={{ fontSize: '0.8rem', color: 'var(--error, #e5484d)' }}>{error}</div>}
-        <button className="btn-primary" type="submit" disabled={!tokenInput.trim()}>
-          Unlock
+        <button className="btn-primary" type="submit" disabled={!username.trim() || !password || submitting}>
+          {submitting ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
     </div>

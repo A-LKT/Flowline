@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, LogOut } from 'lucide-react';
 import { useSettingsStore } from '../../state/settingsStore';
+import { useAuthStore } from '../../state/authStore';
 
 type Props = { onClose: () => void };
 
@@ -11,6 +12,8 @@ export const SettingsModal = ({ onClose }: Props) => {
   const setTheme         = useSettingsStore((s) => s.setTheme);
   const setEditorFontSize   = useSettingsStore((s) => s.setEditorFontSize);
   const setShowNodeTiming   = useSettingsStore((s) => s.setShowNodeTiming);
+  const user             = useAuthStore((s) => s.user);
+  const logout           = useAuthStore((s) => s.logout);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -87,6 +90,22 @@ export const SettingsModal = ({ onClose }: Props) => {
             Show execution time on nodes
           </label>
         </div>
+
+        {user && (
+          <>
+            <div className="config-divider" style={{ margin: '16px 0' }} />
+            <p className="s-title" style={{ margin: '0 0 12px' }}>Account</p>
+            <div className="field-row field-row--inline" style={{ justifyContent: 'space-between' }}>
+              <span className="field-label">
+                Signed in as <strong>{user.username}</strong>
+              </span>
+              <button className="btn-secondary btn-sm" onClick={() => void logout()}>
+                <LogOut size={14} style={{ marginRight: 6, verticalAlign: '-2px' }} />
+                Log out
+              </button>
+            </div>
+          </>
+        )}
 
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onClose}>Close</button>

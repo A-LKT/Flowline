@@ -20,12 +20,21 @@ services:
       REGISTERED_SERVICES: '[{"name":"WhatsApp Bridge","url":"http://whatsapp-bridge:3002","healthPath":"/health"}]'
       # Delete finished job runs older than N days (0 or unset = keep forever).
       # RUN_RETENTION_DAYS: "90"
-      # Require this token on every API request (Authorization: Bearer <token>).
-      # Strongly recommended: without it, anyone who can reach port 3001 can
-      # read workflows, run them, and export decrypted secrets.
-      # API_TOKEN: "${API_TOKEN}"
+      # Login credential for the single account. REQUIRED — the app refuses to
+      # start without a password, so it is never reachable unauthenticated. Prefer
+      # AUTH_PASSWORD_HASH (from `npm run auth:hash-password`) over the plaintext.
+      AUTH_USERNAME: "${AUTH_USERNAME:-admin}"
+      AUTH_PASSWORD: "${AUTH_PASSWORD}"
+      # AUTH_PASSWORD_HASH: "${AUTH_PASSWORD_HASH}"
+      # AUTH_SESSION_TTL_HOURS: "168"
+      # Session cookie is marked Secure automatically in production; serve HTTPS.
+      # AUTH_COOKIE_SECURE: "true"
       # Allowed cross-origin origins, comma-separated (unset = same-origin only).
+      # When set, the session cookie switches to SameSite=None; Secure.
       # CORS_ORIGIN: "https://example.com"
+      # Behind a reverse proxy, trust X-Forwarded-For for the real client IP (used
+      # for login throttling and logs). true | hop-count | CIDR/IP allowlist.
+      # TRUST_PROXY: "true"
     cap_add:
       - NET_RAW   # required for ICMP ping inside the container
     restart: unless-stopped

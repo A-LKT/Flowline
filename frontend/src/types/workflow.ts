@@ -55,13 +55,16 @@ export type RunStatus = 'queued' | 'running' | 'success' | 'error' | 'cancelled'
 
 export type RunTriggerType = 'manual' | 'schedule' | 'webhook';
 
+/** One line of a run's log. `ts` is null only for legacy pre-timestamp runs. */
+export type RunLogEntry = { ts: number | null; text: string };
+
 export type Run = {
   id: string;
   workflowId: string;
   status: RunStatus;
   triggerType: RunTriggerType;
   results: Record<string, NodeExecutionResult> | null;
-  logs: string[] | null;
+  logs: RunLogEntry[] | null;
   workflowVersion: number | null;
   workflowSnapshotHash?: string | null;
   startedAt: number | null;

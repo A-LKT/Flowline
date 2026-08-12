@@ -54,7 +54,7 @@ const makeWorkflow = (name = 'Untitled Workflow'): Workflow => ({
 // Types
 // ---------------------------------------------------------------------------
 
-export type LogEntry = { text: string; kind: 'node' | 'log' | 'system' };
+export type LogEntry = { text: string; kind: 'node' | 'log' | 'system'; ts: number | null };
 
 type ExecutionState = {
   running: boolean;
@@ -108,7 +108,7 @@ type WorkflowStore = {
   addActiveNode: (id: string) => void;
   removeActiveNode: (id: string) => void;
   setNodeResult: (result: NodeExecutionResult) => void;
-  addLog: (msg: string, kind?: LogEntry['kind']) => void;
+  addLog: (msg: string, kind?: LogEntry['kind'], ts?: number | null) => void;
   resetExecution: () => void;
   focusNode: (id: string | null) => void;
 
@@ -402,8 +402,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => {
         return { execution: { ...s.execution, results: { ...s.execution.results, [result.nodeId]: merged } } };
       }),
 
-    addLog: (msg, kind = 'system') =>
-      set((s) => ({ execution: { ...s.execution, logs: [...s.execution.logs, { text: msg, kind }] } })),
+    addLog: (msg, kind = 'system', ts = Date.now()) =>
+      set((s) => ({ execution: { ...s.execution, logs: [...s.execution.logs, { text: msg, kind, ts }] } })),
 
     resetExecution: () => set({ execution: { ...EMPTY_EXECUTION } }),
 

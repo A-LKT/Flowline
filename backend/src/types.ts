@@ -94,6 +94,13 @@ export type RunStatus = 'queued' | 'running' | 'success' | 'error' | 'cancelled'
 
 export type RunTriggerType = 'manual' | 'schedule' | 'schedule-catchup' | 'webhook' | 'file-watch' | 'email';
 
+/**
+ * One line of a run's domain log. `ts` is the wall-clock time the line was
+ * emitted (stamped in the worker at `onLog`). `ts` is null only for legacy runs
+ * persisted before timestamps existed — see rowToRun's back-compat normaliser.
+ */
+export type RunLogEntry = { ts: number | null; text: string };
+
 export type Run = {
   id: string;
   workflowId: string;
@@ -101,7 +108,7 @@ export type Run = {
   triggerType: RunTriggerType;
   triggerId: string | null;
   results: Record<string, NodeExecutionResult> | null;
-  logs: string[] | null;
+  logs: RunLogEntry[] | null;
   startedAt: number | null;
   finishedAt: number | null;
   createdAt: number;
@@ -174,6 +181,6 @@ export type WorkerEvent =
   | { type: 'ready' }
   | { type: 'node:start'; runId: string; nodeId: string; nodeName: string; resolvedConfig: Record<string, unknown>; startedAt: number }
   | { type: 'node:complete'; runId: string; nodeId: string; nodeName: string; status: 'success' | 'error'; input: unknown; output: unknown; error?: string; startedAt: number; finishedAt: number }
-  | { type: 'log'; runId: string; message: string }
-  | { type: 'done'; runId: string; status: 'success' | 'error' | 'cancelled'; results: Record<string, NodeExecutionResult>; logs: string[] }
+  | { type: 'log'; runId: string; ts: number; message: string }
+  | { type: 'done'; runId: string; status: 'success' | 'error' | 'cancelled'; results: Record<string, NodeExecutionResult>; logs: RunLogEntry[] }
   | { type: 'error'; runId: string; error: string };

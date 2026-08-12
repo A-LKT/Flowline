@@ -1559,17 +1559,28 @@ function PageAdmin() {
         run statistics, service status, export backup, and import/restore.
       </p>
 
-      <h2>API authentication</h2>
+      <h2>Authentication</h2>
       <p>
-        Set <Code>API_TOKEN</Code> in the server environment to require a shared token on every API
-        request (<Code>Authorization: Bearer &lt;token&gt;</Code>; SSE streams append{' '}
-        <Code>?token=…</Code>). On first load the UI asks for the token and remembers it in the
-        browser. Webhooks (protected by their own HMAC secrets), <Code>/health</Code>, the AI
-        capability reference, and served media files stay open by design.
+        Flowline requires a login. Configure the single account at deploy time with{' '}
+        <Code>AUTH_USERNAME</Code> (defaults to <Code>admin</Code>) and a password — either{' '}
+        <Code>AUTH_PASSWORD</Code>, or preferably <Code>AUTH_PASSWORD_HASH</Code> from{' '}
+        <Code>npm run auth:hash-password</Code>, which keeps the cleartext out of your config. The
+        backend refuses to start without a password, so an instance is never reachable
+        unauthenticated.
+      </p>
+      <p>
+        Signing in creates a server-side session and sets an <Code>httpOnly</Code> cookie the browser
+        sends automatically — nothing is stored in the page and the token never appears in a URL.
+        Sessions last <Code>AUTH_SESSION_TTL_HOURS</Code> (default 168 = 7 days) and are revoked on
+        logout (under <strong>Settings → Account</strong>). Webhooks (protected by their own HMAC
+        secrets), <Code>/health</Code>, the AI capability reference, and served media files stay open
+        by design.
       </p>
       <Callout warn>
-        <strong>Without API_TOKEN the API is open.</strong> Anyone who can reach the port can read
-        workflows, run them, and export decrypted secrets. Always set it outside trusted networks.
+        <strong>Serve over HTTPS in production.</strong> The session cookie is marked{' '}
+        <Code>Secure</Code> when <Code>NODE_ENV=production</Code>; put a TLS-terminating reverse proxy
+        in front of the app. Use a strong password — it is the only thing standing between the
+        internet and your workflows and decrypted secrets.
       </Callout>
 
       <h2>Export backup</h2>

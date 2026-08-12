@@ -671,6 +671,17 @@ body {
 
 .run-review-actions { display: flex; align-items: center; gap: 6px; }
 
+.run-review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+.run-review-meta-sep { opacity: 0.5; }
+
 .run-review-warning {
   padding: 6px 12px;
   background: rgba(210, 153, 34, 0.1);
@@ -860,6 +871,21 @@ body {
 .run-panel-log-empty { color: var(--text2); }
 
 .log-line { margin-bottom: 2px; color: var(--text); }
+.log-ts {
+  color: var(--text2);
+  opacity: 0.7;
+  margin-right: 8px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.exec-status-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.exec-time {
+  font-size: 11px;
+  color: var(--text2);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
 .log-line[data-level="error"] { color: var(--red); }
 .log-line[data-level="warn"]  { color: var(--amber); }
 
@@ -3329,11 +3355,27 @@ body {
   white-space: nowrap;
 }
 
+.run-detail-node-timing {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.run-detail-node-time {
+  font-size: 11px;
+  color: var(--text2);
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+  min-width: 74px;
+  text-align: right;
+}
 .run-detail-node-dur {
   font-size: 11px;
   color: var(--text2);
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+  min-width: 46px;
+  text-align: right;
 }
 
 .run-detail-output {

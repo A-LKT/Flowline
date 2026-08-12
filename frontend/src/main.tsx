@@ -4,9 +4,10 @@ import './index.css';
 import { installApiAuth } from './utils/apiAuth';
 import { AuthGate } from './components/AuthGate';
 
-// Attach the stored API token to every fetch/EventSource before anything else
-// runs. AuthGate verifies it (prompting if needed), loads persisted data, and
-// then renders the app.
+// Install the global 401 interceptor before anything else runs. AuthGate then
+// verifies the session (showing the login screen if needed), loads persisted
+// data, and renders the app. The session itself rides in an httpOnly cookie the
+// browser sends automatically, so there is no token to attach here.
 installApiAuth();
 
 createRoot(document.getElementById('root')!).render(

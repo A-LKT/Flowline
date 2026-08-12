@@ -129,6 +129,9 @@ function ExecSection({ result, runId, nodeId }: {
         </div>
         <div className="exec-status-row">
           <span className="run-badge" data-status={shown.status}>{shown.status}</span>
+          {shown.startedAt > 0 && (
+            <span className="exec-time" title={new Date(shown.startedAt).toISOString()}>{fmtDateTime(shown.startedAt)}</span>
+          )}
           {shown.startedAt > 0 && shown.finishedAt > 0 && (
             <span className="exec-duration">{fmtDuration(shown.startedAt, shown.finishedAt)}</span>
           )}
@@ -295,6 +298,9 @@ function RunNodeInspector({ selectedIds, streaming }: { selectedIds: string[]; s
       {/* Bottom section — execution results */}
       <div className="exec-status-row">
         <span className="run-badge" data-status={shown.status}>{shown.status}</span>
+        {shown.startedAt > 0 && (
+          <span className="exec-time" title={new Date(shown.startedAt).toISOString()}>{fmtDateTime(shown.startedAt)}</span>
+        )}
         {shown.startedAt > 0 && shown.finishedAt > 0 && (
           <span className="exec-duration">{fmtDuration(shown.startedAt, shown.finishedAt)}</span>
         )}

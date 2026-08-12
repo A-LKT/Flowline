@@ -5,7 +5,7 @@ import type { Run, Workflow } from '../../types/workflow';
 const UUID_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
 
 function renderLogLine(line: string, onUuidClick: (id: string) => void) {
-  const parts = line.split(UUID_RE);
+  const parts = (line ?? '').split(UUID_RE);
   return parts.map((part, i) =>
     i % 2 === 1
       ? <button key={i} className="log-uuid" onClick={() => onUuidClick(part)} title="Focus node on canvas">{part}</button>
@@ -17,6 +17,24 @@ function fmtDuration(startedAt: number, finishedAt: number): string {
   if (!startedAt || !finishedAt) return '—';
   const ms = finishedAt - startedAt;
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(2)}s`;
+}
+
+// Local wall-clock, matching the Jobs list convention (JobsView.tsx:23-25):
+// human-readable local time on screen, full ISO in the tooltip.
+function fmtClock(ts: number | null | undefined): string {
+  if (!ts) return '';
+  return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function fmtDateTime(ts: number | null | undefined): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return `${date}, ${fmtClock(ts)}`;
+}
+
+function isoTitle(ts: number | null | undefined): string | undefined {
+  return ts ? new Date(ts).toISOString() : undefined;
 }
 
 type Tab = 'nodes' | 'log';
@@ -100,6 +118,27 @@ export const RunReviewPanel = ({ runId, workflow, selectedNodeId, streaming, onC
           </span>
           {run && <span className="run-badge" data-status={run.status}>{run.status}</span>}
         </div>
+        {run && (
+          <div className="run-review-meta">
+            {run.startedAt ? (
+              <span title={isoTitle(run.startedAt)}>Started {fmtDateTime(run.startedAt)}</span>
+            ) : (
+              <span title={isoTitle(run.createdAt)}>Queued {fmtDateTime(run.createdAt)}</span>
+            )}
+            {run.finishedAt && (
+              <>
+                <span className="run-review-meta-sep">·</span>
+                <span title={isoTitle(run.finishedAt)}>finished {fmtClock(run.finishedAt)}</span>
+              </>
+            )}
+            {run.startedAt && run.finishedAt && (
+              <>
+                <span className="run-review-meta-sep">·</span>
+                <span>{fmtDuration(run.startedAt, run.finishedAt)}</span>
+              </>
+            )}
+          </div>
+        )}
         <div className="run-review-actions">
           {streaming && isActiveRun && (
             <button className="btn-cancel btn-sm" onClick={() => onCancel(runId)} title="Cancel this run">
@@ -164,7 +203,12 @@ export const RunReviewPanel = ({ runId, workflow, selectedNodeId, streaming, onC
                     {iterCount > 0 && <span className="run-review-iter-badge">×{iterCount + 1}</span>}
                     {!onCanvas && <span className="run-review-missing-tag">removed</span>}
                   </span>
-                  <span className="run-detail-node-dur">{fmtDuration(r.startedAt, r.finishedAt)}</span>
+                  <span className="run-detail-node-timing">
+                    {r.startedAt > 0 && (
+                      <span className="run-detail-node-time" title={isoTitle(r.startedAt)}>{fmtClock(r.startedAt)}</span>
+                    )}
+                    <span className="run-detail-node-dur">{fmtDuration(r.startedAt, r.finishedAt)}</span>
+                  </span>
                 </button>
               );
             })
@@ -186,7 +230,9 @@ export const RunReviewPanel = ({ runId, workflow, selectedNodeId, streaming, onC
                 </button>
                 <button
                   className="btn-secondary btn-sm"
-                  onClick={() => void navigator.clipboard.writeText(visibleLogs.map((e) => e.text).join('\n'))}
+                  onClick={() => void navigator.clipboard.writeText(
+                    visibleLogs.map((e) => (e.ts != null ? `${fmtClock(e.ts)}  ${e.text}` : e.text)).join('\n'),
+                  )}
                   title="Copy log to clipboard"
                 >
                   Copy log
@@ -209,7 +255,12 @@ export const RunReviewPanel = ({ runId, workflow, selectedNodeId, streaming, onC
               </span>
             ) : (
               visibleLogs.map((entry, i) => (
-                <div key={i} className="log-line">{renderLogLine(entry.text, focusNode)}</div>
+                <div key={i} className="log-line">
+                  {entry.ts != null && (
+                    <span className="log-ts" title={isoTitle(entry.ts)}>{fmtClock(entry.ts)}</span>
+                  )}
+                  <span className="log-line-text">{renderLogLine(entry.text, focusNode)}</span>
+                </div>
               ))
             )}
           </div>

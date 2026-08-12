@@ -1,6 +1,7 @@
 // Ported from frontend — identical logic, extended context with scripts.
 import { getNode } from './nodeRegistry';
 import { resolveString } from './expression';
+import { INTERNAL_TOKEN_HEADER, getInternalToken } from '../auth/internalToken';
 import type { Workflow, ExecutionContext, NodeId, WorkflowNode, WorkflowEdge, Script } from '../types';
 
 function resolveConfigStrings(config: Record<string, unknown>, context: ExecutionContext): Record<string, unknown> {
@@ -242,7 +243,7 @@ export const executeWorkflow = async (
             method:  'POST',
             headers: {
               'Content-Type': 'application/json',
-              ...(process.env.API_TOKEN ? { Authorization: `Bearer ${process.env.API_TOKEN}` } : {}),
+              [INTERNAL_TOKEN_HEADER]: getInternalToken(),
             },
             body:    JSON.stringify({
               failedNodeId:      node.id,

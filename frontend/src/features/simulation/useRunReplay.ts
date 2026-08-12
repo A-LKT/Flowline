@@ -91,7 +91,7 @@ export function useRunReplay(workflow: Workflow | undefined): ReplayController {
             finishedAt: event.finishedAt as number,
           });
         } else if (event.type === 'log') {
-          addLog(event.message as string, 'log');
+          addLog(event.message as string, 'log', event.ts as number);
         } else if (event.type === 'done') {
           const results = event.results as Record<string, NodeExecutionResult>;
           // Always merge backend-accumulated results (carries iterations)
@@ -99,9 +99,16 @@ export function useRunReplay(workflow: Workflow | undefined): ReplayController {
           setExecution({ results: { ...current, ...results } });
 
           if (!hasNodeEvents) {
-            // Synthetic done from a finished run — synthesize log lines too
-            const sorted = Object.values(results).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
-            const nodeEntries: LogEntry[] = sorted.map((r) => {
+            // Synthetic done from a finished run — synthesize log lines too. Each
+            // carries a `sort` key (separate from the displayed `ts`) so we can
+            // interleave node and log lines into one true timeline while still
+            // choosing what timestamp to render:
+            //   - node line: sort by startedAt; junction nodes have startedAt=0,
+            //     which keeps them at the top (structural, run early) and renders
+            //     no clock (fmtClock(0) is blank) rather than a bogus 1970.
+            //   - log line: sort by its worker ts; legacy entries have ts=null and
+            //     sort last (Number.MAX_SAFE_INTEGER), preserving old behaviour.
+            const nodeEntries = Object.values(results).map((r) => {
               const wfNode  = workflow.nodes.find((n) => n.id === r.nodeId);
               const name    = wfNode?.name ?? wfNode?.type ?? r.nodeId;
               const dur     = (r.finishedAt ?? 0) - (r.startedAt ?? 0);
@@ -109,12 +116,23 @@ export function useRunReplay(workflow: Workflow | undefined): ReplayController {
               const text = r.status === 'error'
                 ? `✗ [${name}]${iterStr} ${dur}ms — ${r.error ?? 'unknown error'} · ${r.nodeId}`
                 : `✓ [${name}]${iterStr} ${dur}ms · ${r.nodeId}`;
-              return { text, kind: 'node' as const };
+              return { entry: { text, kind: 'node' as const, ts: r.startedAt || null }, sort: r.startedAt ?? 0 };
             });
-            const logEntries: LogEntry[] = (event.logs as string[]).map((text) => ({ text, kind: 'log' as const }));
-            setExecution({ logs: [...nodeEntries, ...logEntries] });
+            // Tolerate both the current { ts, text } shape and the legacy bare
+            // string[] a not-yet-upgraded backend may still stream — otherwise a
+            // version skew crashes the Log tab on `e.text` of a string.
+            const logEntries = (event.logs as (string | { ts: number | null; text: string })[])
+              .map((e) => {
+                const text = typeof e === 'string' ? e : e.text;
+                const ts   = typeof e === 'string' ? null : e.ts;
+                return { entry: { text, kind: 'log' as const, ts }, sort: ts ?? Number.MAX_SAFE_INTEGER };
+              });
+            const ordered: LogEntry[] = [...nodeEntries, ...logEntries]
+              .sort((a, b) => a.sort - b.sort)
+              .map((x) => x.entry);
+            setExecution({ logs: ordered });
           } else {
-            addLog(`[${new Date().toISOString()}] Workflow completed`, 'system');
+            addLog('Workflow completed', 'system');
           }
           finish();
         } else if (event.type === 'error') {

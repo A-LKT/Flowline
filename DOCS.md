@@ -743,11 +743,17 @@ Use the **Ollama Completion** node (`ollama-completion`) for on-premise inferenc
 
 Export a full system backup, restore from a backup file, and monitor system health.
 
-### API authentication
+### Authentication
 
-Set `API_TOKEN` in the server environment to require a shared token on every API request (`Authorization: Bearer <token>`; SSE streams append `?token=…`). On first load the UI asks for the token and remembers it in the browser. Webhooks (protected by their own HMAC secrets), `/health`, the AI capability reference (`/api/ai/*`), and served media files (`/files/`, `/media/`) stay open by design. Cross-origin requests are refused unless `CORS_ORIGIN` lists the allowed origins.
+Flowline requires a login. Configure the single account at deploy time with `AUTH_USERNAME` (defaults to `admin`) and a password — either `AUTH_PASSWORD` (plaintext, hashed at startup) or, preferably, `AUTH_PASSWORD_HASH` from `cd backend && npm run auth:hash-password -- 'your-password'`, which keeps the cleartext out of your config. **The backend refuses to start if no password is set**, so an instance is never reachable unauthenticated.
 
-> **Without API_TOKEN the API is open.** Anyone who can reach the port can read workflows, run them, and export decrypted secrets. Always set it outside trusted networks.
+Signing in creates a server-side session and sets an `httpOnly` cookie the browser sends automatically — nothing is stored in the page, and the token never appears in a URL or a reverse-proxy log. Sessions last `AUTH_SESSION_TTL_HOURS` (default 168 = 7 days), slide forward on use, and are revoked on logout. Changing the configured password and restarting invalidates all existing sessions.
+
+The session cookie is marked `Secure` in production (`NODE_ENV=production`), so serve the app over HTTPS; override with `AUTH_COOKIE_SECURE` for local HTTP. The shipped UI is served same-origin by the `app` container, so the cookie is `SameSite=Lax` and requests are same-origin only. `CORS_ORIGIN` controls which extra origins the API accepts credentialed requests from (the cookie then switches to `SameSite=None`) — for programmatic clients, not a separately-hosted browser UI.
+
+Exempt from the login gate by design: webhooks (protected by their own HMAC secrets), `/health`, the AI capability reference (`/api/ai/*` — capability shapes only, never user data), and served media files (`/files/`, `/media/`). Internally, the run engine's worker threads authenticate their own loopback calls (async sub-workflow runs, error-handler firing) with a random per-boot token that never leaves the process and is never a user-facing access path.
+
+Repeated failed logins from an address are rate-limited with an escalating backoff. The password/hashing scheme (scrypt) and the `users`/`sessions` schema are the same substrate the premium multi-tenant edition builds on — the free edition simply seeds exactly one account from config.
 
 ### Export backup
 

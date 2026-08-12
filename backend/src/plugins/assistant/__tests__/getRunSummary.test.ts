@@ -46,7 +46,7 @@ before(async () => {
     resolvedConfig: { blob: 'x'.repeat(10_000) }, output: null,
     startedAt: now, finishedAt: now,
   };
-  db.updateRun(RUN_ID, { status: 'error', results: { 'n-ok': okNode, 'n-fail': failNode, 'n-big': bigNode }, logs: ['[INFO] started'] });
+  db.updateRun(RUN_ID, { status: 'error', results: { 'n-ok': okNode, 'n-fail': failNode, 'n-big': bigNode }, logs: [{ ts: now, text: '[INFO] started' }] });
   ({ runTool } = await import('../tools'));
 });
 

@@ -1,57 +1,101 @@
-// API token support. The backend (when started with API_TOKEN) requires a
-// shared token on every API route. The token is entered once via the AuthGate
-// screen, stored in localStorage, and attached transparently to every request:
-//   - fetch: Authorization: Bearer <token>   (all API calls use relative URLs)
-//   - EventSource: ?token=<token>            (SSE cannot set headers)
-// Wrapping fetch/EventSource here keeps the dozens of call sites untouched.
+// Session auth for the SPA. The backend issues an httpOnly session cookie on
+// login (see backend/src/auth/plugin.ts); the browser sends it automatically on
+// every same-origin request, so there is nothing to attach here — no token in
+// localStorage, no ?token= on SSE URLs. This module only:
+//   - talks to the /api/auth/* endpoints (login / logout / check), and
+//   - installs a global 401 interceptor that bounces the app back to the login
+//     screen the moment a session expires or is revoked mid-use.
 
-const STORAGE_KEY = 'api:token';
-
-export const getApiToken = (): string => localStorage.getItem(STORAGE_KEY) ?? '';
-export const setApiToken = (token: string): void => {
-  if (token) localStorage.setItem(STORAGE_KEY, token);
-  else localStorage.removeItem(STORAGE_KEY);
-};
+export interface AuthUser {
+  id: string;
+  username: string;
+  role: string;
+}
 
 const isSameOrigin = (url: string): boolean =>
   url.startsWith('/') || url.startsWith(window.location.origin);
 
+let onUnauthorized: (() => void) | null = null;
+
+// Register the callback that flips the app to the login screen. Called by AuthGate.
+export function setUnauthorizedHandler(fn: () => void): void {
+  onUnauthorized = fn;
+}
+
+// Wrap fetch and EventSource so that:
+//   - the session cookie is always sent to our API (credentials: 'include'),
+//     which matters when the UI is served cross-origin (CORS_ORIGIN); same-origin
+//     is unaffected, and
+//   - any 401 from a same-origin API call surfaces as "session lost".
+// The /api/auth/* endpoints are excluded from the 401 handling — their 401s (a
+// wrong password, or the initial unauthenticated check) are handled inline by the
+// login flow.
 export function installApiAuth(): void {
   const origFetch = window.fetch.bind(window);
-  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const token = getApiToken();
-    if (token && isSameOrigin(url)) {
-      const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-      if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
-      init = { ...init, headers };
+    if (isSameOrigin(url) && init?.credentials == null && !(input instanceof Request)) {
+      init = { ...init, credentials: 'include' };
     }
-    return origFetch(input, init);
+    const res = await origFetch(input, init);
+    try {
+      if (res.status === 401 && isSameOrigin(url) && !url.includes('/api/auth/')) {
+        onUnauthorized?.();
+      }
+    } catch { /* never let interception break the response */ }
+    return res;
   };
 
+  // EventSource ignores fetch's credentials; withCredentials makes it send the
+  // cookie. Harmless same-origin (the stream already carries it), and correct if a
+  // programmatic client ever points at the API cross-origin with CORS_ORIGIN set.
   const OrigEventSource = window.EventSource;
   window.EventSource = class extends OrigEventSource {
-    constructor(url: string | URL, eventSourceInitDict?: EventSourceInit) {
-      let u = typeof url === 'string' ? url : url.href;
-      const token = getApiToken();
-      if (token && isSameOrigin(u)) {
-        u += (u.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
-      }
-      super(u, eventSourceInitDict);
+    constructor(url: string | URL, init?: EventSourceInit) {
+      const u = typeof url === 'string' ? url : url.href;
+      super(u, { ...init, withCredentials: true });
     }
   } as typeof EventSource;
 }
 
-export type AuthStatus = 'ok' | 'unauthorized' | 'offline';
+export type LoginResult = { ok: true } | { ok: false; error: string };
 
-// Probe the protected check endpoint. 'offline' (backend unreachable) is not
-// treated as an auth failure — the stores surface offline state themselves.
-export async function checkAuth(): Promise<AuthStatus> {
+export async function login(username: string, password: string): Promise<LoginResult> {
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (res.ok) return { ok: true };
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    return { ok: false, error: data.error ?? 'Login failed' };
+  } catch {
+    return { ok: false, error: 'Cannot reach the server. Is it running?' };
+  }
+}
+
+export async function logout(): Promise<void> {
+  try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* best effort */ }
+}
+
+export type AuthCheck =
+  | { status: 'ok'; user: AuthUser }
+  | { status: 'unauthorized' }
+  | { status: 'offline' };
+
+// Probe the session. 'offline' (backend unreachable) is distinct from
+// 'unauthorized' so the gate doesn't force a login just because the server is down.
+export async function checkAuth(): Promise<AuthCheck> {
   try {
     const res = await fetch('/api/auth/check');
-    if (res.status === 401) return 'unauthorized';
-    return res.ok ? 'ok' : 'offline';
+    if (res.status === 401) return { status: 'unauthorized' };
+    if (res.ok) {
+      const d = await res.json() as { user: AuthUser };
+      return { status: 'ok', user: d.user };
+    }
+    return { status: 'offline' };
   } catch {
-    return 'offline';
+    return { status: 'offline' };
   }
 }

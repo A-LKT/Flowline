@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Sparkles, Send, SlidersHorizontal, Wrench, Check, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { AppHeader } from '../../components/AppHeader';
 import { navigate, navigateReplace, formatRoute } from '../../state/route';
+import type { Route } from '../../state/route';
 import { useWorkflowStore } from '../../state/workflowStore';
 import { useScriptStore } from '../../state/scriptStore';
 import { useTriggerStore } from '../../state/triggerStore';
 import type { Workflow } from '../../types/workflow';
 import type { Script } from '../../types/script';
-import type { Trigger } from '../../types/trigger';
+import type { Trigger, TriggerTarget } from '../../types/trigger';
 
 type Props = { onHome: () => void; troubleshootRunId?: string };
 
@@ -35,6 +36,25 @@ const ARTIFACT_TYPES: { key: ArtifactKey; label: string; picker: 'list' | 'text'
   { key: 'runs',      label: 'Job runs',  picker: 'text' },
 ];
 const parseIds = (raw: string): string[] => [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))];
+
+// A proposed trigger targets the workflow the assistant proposed alongside it,
+// which has no real id until *its* proposal is applied — so the model fills
+// target.id with the workflow's NAME. Resolve it to a real workflow id at Apply
+// time (the store now includes the just-applied workflow): exact id first, then a
+// case-insensitive name match. Throws an actionable error if it can't resolve, so
+// we never send a dangling target (the backend rejects one too). Non-workflow
+// targets pass through untouched.
+function resolveTriggerTarget(target: unknown): TriggerTarget {
+  const t = (target ?? {}) as { type?: string; id?: string };
+  if (t.type !== 'workflow') return t as TriggerTarget;
+  const raw = (t.id ?? '').trim();
+  if (!raw) throw new Error('The proposed trigger has no target workflow.');
+  const workflows = useWorkflowStore.getState().workflows;
+  const match = workflows.find((w) => w.id === raw)
+    ?? workflows.find((w) => w.name.toLowerCase() === raw.toLowerCase());
+  if (!match) throw new Error(`No workflow named "${raw}" found — apply the workflow first, then apply this trigger.`);
+  return { type: 'workflow', id: match.id };
+}
 type ArtifactItem = { id: string; name: string };
 const scopeMode = (v: ArtifactScope): 'none' | 'some' | 'all' => (v === 'all' ? 'all' : typeof v === 'object' ? 'some' : 'none');
 const isGranted = (v: ArtifactScope): boolean => v === 'all' || (typeof v === 'object' && v.ids.length > 0);
@@ -248,6 +268,27 @@ export const AssistantView = ({ onHome, troubleshootRunId }: Props) => {
     // targetId (resolved server-side to a real, in-scope id) drives update vs create.
     // It's authoritative — any id the model tucked into json is ignored.
     const targetId = p.targetId;
+
+    // Apply-in-a-new-tab: reserve the tab synchronously inside the click gesture
+    // (so it isn't popup-blocked), run `persist`, then point the tab at `route` —
+    // a cold tab load reads the artifact from the backend and would bounce if it
+    // isn't saved yet, so `persist` must have landed the save (and must throw if it
+    // didn't). On failure the reserved tab is closed and the error rethrown (the
+    // outer catch surfaces it on the card). Popup blocked → same-tab navigate.
+    const applyInNewTab = async (persist: () => Promise<void>, route: Route) => {
+      const win = window.open('', '_blank');
+      try {
+        await persist();
+      } catch (err) {
+        win?.close();  // don't leave an orphaned blank tab on a failed apply
+        throw err;
+      }
+      setApplied((a) => ({ ...a, [p.id]: '' }));
+      const href = `${window.location.pathname}${window.location.search}${formatRoute(route)}`;
+      if (win) win.location.href = href;
+      else navigate(route);  // popup blocked → fall back to this tab
+    };
+
     try {
       if (p.kind === 'workflow') {
         const nodes = (Array.isArray(j.nodes) ? j.nodes : []) as Workflow['nodes'];
@@ -266,16 +307,13 @@ export const AssistantView = ({ onHome, troubleshootRunId }: Props) => {
             variables: (j.variables as Record<string, unknown>) ?? existing.variables ?? {},
             layoutDirection: j.layoutDirection === 'LR' ? 'LR' : j.layoutDirection === 'TB' ? 'TB' : existing.layoutDirection,
           };
-          const win = window.open('', '_blank');
-          await restoreWorkflow(targetId, data);
-          // restoreWorkflow swallows a failed save into backendOffline (and the POST
-          // 409s on a deprecated workflow) — don't claim success if it didn't land.
-          if (useWorkflowStore.getState().backendOffline) { win?.close(); throw new Error('Could not save the updated workflow'); }
-          grantArtifactId('workflows', targetId);
-          setApplied((a) => ({ ...a, [p.id]: '' }));
-          const href = `${window.location.pathname}${window.location.search}${formatRoute({ space: 'workflows', workflowId: targetId })}`;
-          if (win) win.location.href = href;
-          else navigate({ space: 'workflows', workflowId: targetId });
+          await applyInNewTab(async () => {
+            await restoreWorkflow(targetId, data);
+            // restoreWorkflow swallows a failed save into backendOffline (and the POST
+            // 409s on a deprecated workflow) — don't claim success if it didn't land.
+            if (useWorkflowStore.getState().backendOffline) throw new Error('Could not save the updated workflow');
+            grantArtifactId('workflows', targetId);
+          }, { space: 'workflows', workflowId: targetId });
           return;
         }
         const wf: Workflow = {
@@ -288,20 +326,13 @@ export const AssistantView = ({ onHome, troubleshootRunId }: Props) => {
           layoutDirection: j.layoutDirection === 'LR' ? 'LR' : 'TB',
           createdAt: now, updatedAt: now,
         };
-        // Open the generated workflow in a NEW tab rather than replacing this
-        // chat. Reserve the tab synchronously inside the click gesture (so it
-        // isn't popup-blocked), persist the workflow, then point the tab at it —
-        // a cold tab load reads /workflows and would bounce if it isn't saved yet.
-        const win = window.open('', '_blank');
-        await importWorkflow(wf);
-        // importWorkflow swallows a save failure into backendOffline — if the POST
-        // didn't land, the cold tab would bounce off the missing workflow, so bail.
-        if (useWorkflowStore.getState().backendOffline) { win?.close(); throw new Error('Could not save the generated workflow'); }
-        grantArtifactId('workflows', wf.id);
-        setApplied((a) => ({ ...a, [p.id]: '' }));
-        const href = `${window.location.pathname}${window.location.search}${formatRoute({ space: 'workflows', workflowId: wf.id })}`;
-        if (win) win.location.href = href;
-        else navigate({ space: 'workflows', workflowId: wf.id }); // popup blocked → fall back to this tab
+        await applyInNewTab(async () => {
+          await importWorkflow(wf);
+          // importWorkflow swallows a save failure into backendOffline — if the POST
+          // didn't land, the cold tab would bounce off the missing workflow, so bail.
+          if (useWorkflowStore.getState().backendOffline) throw new Error('Could not save the generated workflow');
+          grantArtifactId('workflows', wf.id);
+        }, { space: 'workflows', workflowId: wf.id });
       } else if (p.kind === 'script') {
         if (targetId) {
           const existing = useScriptStore.getState().scripts.find((s) => s.id === targetId);
@@ -349,16 +380,20 @@ export const AssistantView = ({ onHome, troubleshootRunId }: Props) => {
           // put in json so they can't override the real record.
           const patch = { ...j };
           delete patch.id; delete patch.createdAt; delete patch.updatedAt;
-          await updateTrigger(targetId, patch as Partial<Trigger>);
-          grantArtifactId('triggers', targetId);
-          setApplied((a) => ({ ...a, [p.id]: '' }));
-          navigate({ space: 'triggers' });
+          await applyInNewTab(async () => {
+            await updateTrigger(targetId, patch as Partial<Trigger>);
+            grantArtifactId('triggers', targetId);
+          }, { space: 'triggers' });
           return;
         }
-        const created = await createTrigger(j as Omit<Trigger, 'id' | 'createdAt' | 'updatedAt'>);
-        grantArtifactId('triggers', created.id);
-        setApplied((a) => ({ ...a, [p.id]: '' }));
-        navigate({ space: 'triggers' });
+        // Resolve target.id (a workflow NAME from the model) to a real id before
+        // reserving the tab — a resolution failure should surface as an error, not a
+        // blank tab. See resolveTriggerTarget (throws if the workflow isn't applied yet).
+        const target = resolveTriggerTarget(j.target);
+        await applyInNewTab(async () => {
+          const created = await createTrigger({ ...j, target } as Omit<Trigger, 'id' | 'createdAt' | 'updatedAt'>);
+          grantArtifactId('triggers', created.id);
+        }, { space: 'triggers' });
       }
     } catch (err) {
       setApplied((a) => ({ ...a, [p.id]: err instanceof Error ? err.message : 'Apply failed' }));

@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
-import type { Workflow, Script, Run, RunStatus, RunTriggerType, NodeExecutionResult, Trigger } from './types';
+import type { Workflow, Script, Run, RunLogEntry, RunStatus, RunTriggerType, NodeExecutionResult, Trigger } from './types';
 import { migrateDatastore } from './datastore/migrate';
 
 const DB_PATH = path.resolve(process.env.DB_PATH ?? './data/workflow.db');
@@ -94,6 +94,34 @@ db.exec(`
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+`);
+
+// ─── Auth: users & sessions ───────────────────────────────────────────────────
+// The free tier seeds exactly one user (id 'local') from deploy-time config; see
+// auth/seed.ts. The schema is multi-row from day one so the premium multiTenant
+// feature only adds rows (and per-resource owner_id scoping) — no core rework.
+// `role` is created now to avoid a later migration on a table with live sessions.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id            TEXT PRIMARY KEY,
+    username      TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'owner',
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    last_seen  INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS sessions_user    ON sessions(user_id);
+  CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires_at);
 `);
 
 // ─── Workflows ──────────────────────────────────────────────────────────────
@@ -372,6 +400,14 @@ type RunRow = {
   workflow_snapshot_hash: string | null;
 };
 
+// Runs persisted before per-line timestamps stored logs as a bare string[].
+// Read them back as timestamp-less entries so every consumer sees one shape.
+const normalizeLogs = (raw: string | null): RunLogEntry[] | null => {
+  if (!raw) return null;
+  const parsed = JSON.parse(raw) as (string | RunLogEntry)[];
+  return parsed.map((e) => (typeof e === 'string' ? { ts: null, text: e } : e));
+};
+
 const rowToRun = (row: RunRow): Run => ({
   id: row.id,
   workflowId: row.workflow_id,
@@ -379,7 +415,7 @@ const rowToRun = (row: RunRow): Run => ({
   triggerType: (row.trigger_type ?? 'manual') as RunTriggerType,
   triggerId: row.trigger_id ?? null,
   results: row.results ? (JSON.parse(row.results) as Record<string, NodeExecutionResult>) : null,
-  logs: row.logs ? (JSON.parse(row.logs) as string[]) : null,
+  logs: normalizeLogs(row.logs),
   startedAt: row.started_at,
   finishedAt: row.finished_at,
   createdAt: row.created_at,
@@ -492,7 +528,7 @@ export const getAllRuns = (params: {
 
 export const updateRun = (
   id: string,
-  patch: { status: RunStatus; results?: Record<string, NodeExecutionResult>; logs?: string[]; startedAt?: number; finishedAt?: number }
+  patch: { status: RunStatus; results?: Record<string, NodeExecutionResult>; logs?: RunLogEntry[]; startedAt?: number; finishedAt?: number }
 ): void => {
   stmts.updateRun.run({
     id,

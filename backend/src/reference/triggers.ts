@@ -5,9 +5,10 @@
  * list against TriggerKind so a newly added kind fails the build until it is
  * documented here.
  *
- * NOTE: triggers are created by a human in the Triggers UI — the AI never
- * creates them. This reference exists so the AI can write correct *instructions*
- * for wiring a trigger to the workflow it produced.
+ * NOTE: the AI may PROPOSE a trigger (propose_artifact kind:"trigger"); a human
+ * still applies it, and may also create one directly in the Triggers UI. This
+ * reference gives the AI the correct config shape per kind and the target-workflow
+ * binding rules (see markdown.ts's Triggers section for the propose guidance).
  */
 import { z } from 'zod';
 

@@ -4,6 +4,7 @@ import { resolveString } from '../engine/expression';
 import { executeWorkflow } from '../engine/executor';
 import { getWorkflow, getAllScripts } from '../db';
 import { loadSecrets } from '../runner/secrets';
+import { INTERNAL_TOKEN_HEADER, getInternalToken } from '../auth/internalToken';
 import type { ExecutionContext, NodeExecutionResult, WorkflowNode } from '../types';
 
 const MAX_DEPTH = 5;
@@ -39,7 +40,7 @@ const execute = async (node: WorkflowNode, context: ExecutionContext): Promise<N
         method:  'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(process.env.API_TOKEN ? { Authorization: `Bearer ${process.env.API_TOKEN}` } : {}),
+          [INTERNAL_TOKEN_HEADER]: getInternalToken(),
         },
         body:    JSON.stringify(vars),
       });

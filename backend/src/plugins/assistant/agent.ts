@@ -22,6 +22,38 @@ export type AgentResult = {
 const PROMISE_RE = /\b(i['’]?ll|i will|i'?m going to|i am going to|let me|give me a (?:sec|second|moment)|one moment|hang on|coming up|shortly|next,? i)\b/i;
 const looksLikePromise = (text: string): boolean => PROMISE_RE.test(text.slice(-200));
 
+// The model is told to call propose_artifact, never to paste the artifact JSON in
+// its reply. With tool_choice:'auto' it sometimes ignores that and dumps a fenced
+// JSON block instead — which never becomes an Apply card, so the user can't act on
+// it. Detect a fenced block whose body looks like one of our artifact shapes
+// (workflow/script/trigger, keyed on the documented fields) so we can nudge it to
+// resubmit through the tool. Deliberately narrow, to avoid firing on the small
+// illustrative snippets a normal explanation might include.
+const FENCED_BLOCK_RE = /```[a-zA-Z]*\s*([\s\S]*?)```/g;
+export const looksLikePastedArtifact = (text: string): boolean => {
+  for (const m of text.matchAll(FENCED_BLOCK_RE)) {
+    const body = m[1];
+    if (!body.includes('{')) continue;
+    if (/"nodes"\s*:/.test(body) || /"edges"\s*:/.test(body)) return true;   // workflow
+    if (/"kind"\s*:/.test(body) && /"config"\s*:/.test(body)) return true;   // trigger
+    if (/"code"\s*:/.test(body) && /"name"\s*:/.test(body)) return true;     // script
+  }
+  return false;
+};
+
+// Decide whether a tool-less final reply should be nudged once, and with what
+// message. Returns null to let the reply stand. Shared by both provider loops.
+const ACT_NUDGE =
+  'You said you would act but produced nothing. Do it now, in this turn — call propose_artifact (or the read tools you need). If you have in fact already finished, restate the concrete result without promising further steps.';
+const PASTED_NUDGE =
+  'You pasted an artifact as JSON in your reply instead of calling propose_artifact, so the user got no Apply card and cannot act on it. Resubmit it now, in this turn, by calling propose_artifact with { kind, json } in the documented format (set targetId to update an existing artifact). Keep only a short plain-language explanation in your reply — do not paste the JSON again.';
+function nudgeFor(text: string): string | null {
+  if (!text.trim()) return null;
+  if (looksLikePromise(text)) return ACT_NUDGE;
+  if (looksLikePastedArtifact(text)) return PASTED_NUDGE;
+  return null;
+}
+
 // ── Shared tool handling (used by both the OpenAI and Anthropic loops) ─────────
 // propose_artifact is not a read tool: validate structure, resolve/scope-check an
 // update target, record the proposal for the UI, and return the model-facing
@@ -131,16 +163,15 @@ export async function runOpenAIAgent(opts: {
       continue; // let the model consume the tool results
     }
 
-    // No tool calls → final answer. But if the model just promised to act
-    // without doing anything, nudge it once to follow through in this turn.
+    // No tool calls → final answer. But if the model just promised to act, or
+    // pasted an artifact as JSON instead of proposing it, nudge it once to follow
+    // through in this turn.
     const finalText = message.content ?? '';
-    if (!nudged && proposals.length === 0 && looksLikePromise(finalText)) {
+    const nudge = !nudged && proposals.length === 0 ? nudgeFor(finalText) : null;
+    if (nudge) {
       nudged = true;
       convo.push({ role: 'assistant', content: finalText });
-      convo.push({
-        role: 'user',
-        content: 'You said you would act but produced nothing. Do it now, in this turn — call propose_artifact (or the read tools you need). If you have in fact already finished, restate the concrete result without promising further steps.',
-      });
+      convo.push({ role: 'user', content: nudge });
       continue;
     }
     return { text: finalText, model, usage: { inputTokens, outputTokens }, trace, proposals };
@@ -242,14 +273,13 @@ export async function runAnthropicAgent(opts: {
       continue;
     }
 
-    // No tool use → final answer. Nudge once if the model only promised to act.
-    if (!nudged && proposals.length === 0 && text.trim() && looksLikePromise(text)) {
+    // No tool use → final answer. Nudge once if the model only promised to act,
+    // or pasted an artifact as JSON instead of proposing it.
+    const nudge = !nudged && proposals.length === 0 ? nudgeFor(text) : null;
+    if (nudge) {
       nudged = true;
       convo.push({ role: 'assistant', content: text });
-      convo.push({
-        role: 'user',
-        content: 'You said you would act but produced nothing. Do it now, in this turn — call propose_artifact (or the read tools you need). If you have in fact already finished, restate the concrete result without promising further steps.',
-      });
+      convo.push({ role: 'user', content: nudge });
       continue;
     }
     // An empty final turn (e.g. cut off at max_tokens) would render as a blank

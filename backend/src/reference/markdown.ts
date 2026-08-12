@@ -101,7 +101,15 @@ export const renderReferenceMarkdown = (ref: CapabilityReference): string => {
   // Triggers.
   out.push(`## Triggers (${ref.counts.triggerKinds})`);
   out.push('');
-  out.push('> Triggers are created by the user in the Triggers UI — produce instructions, not files. Each fires the target workflow.');
+  out.push(
+    '> Each trigger fires a target workflow. You MAY propose a trigger with `propose_artifact` ' +
+      '(`kind: "trigger"`); the user applies it just like a workflow. The proposed JSON is a full ' +
+      'trigger: top-level `name`, `kind`, `enabled`, a `config` object (see each kind below), and ' +
+      '`target: { "type": "workflow", "id": "<the workflow\'s NAME>" }` — `target` and `config` are ' +
+      'siblings, not nested. A trigger MUST target an existing workflow, so when you also propose the ' +
+      'workflow this turn, set `target.id` to that workflow\'s **name**: it is resolved to the real id ' +
+      'on Apply. Tell the user to apply the workflow first, then the trigger.',
+  );
   out.push('');
   for (const t of ref.triggerKinds) {
     out.push(`### ${t.kind}`);

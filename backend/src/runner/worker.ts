@@ -5,7 +5,7 @@ import { parentPort } from 'worker_threads';
 import { executeWorkflow } from '../engine/executor';
 import '../nodes/index';   // register built-in node types
 import '../plugins/index'; // register plugin node types
-import type { WorkerInbound, WorkerEvent } from '../types';
+import type { WorkerInbound, WorkerEvent, RunLogEntry } from '../types';
 
 if (!parentPort) throw new Error('worker.ts must run as a Worker thread');
 
@@ -24,7 +24,7 @@ port.on('message', (msg: WorkerInbound) => {
   if (msg.type !== 'run') return;
 
   const { runId, workflow, scripts, secrets, initialVariables } = msg;
-  const logs: string[] = [];
+  const logs: RunLogEntry[] = [];
   const signal = { cancelled: false };
   currentSignal = signal;
 
@@ -36,8 +36,12 @@ port.on('message', (msg: WorkerInbound) => {
       port.postMessage({ type: 'node:complete', runId, nodeId, nodeName, status, input, output, error, startedAt, finishedAt } satisfies WorkerEvent);
     },
     onLog: (message) => {
-      logs.push(message);
-      port.postMessage({ type: 'log', runId, message } satisfies WorkerEvent);
+      // Stamp the emit time here (not on the browser at receipt) so persisted
+      // and streamed entries share one clock and can be merge-sorted against
+      // node start/complete times into a single ordered timeline.
+      const ts = Date.now();
+      logs.push({ ts, text: message });
+      port.postMessage({ type: 'log', runId, ts, message } satisfies WorkerEvent);
     },
   }, initialVariables, signal, runId)
     .then((ctx) => {

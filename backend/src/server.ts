@@ -1,6 +1,5 @@
 import path from 'path';
 import fs from 'fs';
-import { createHash, timingSafeEqual } from 'crypto';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
@@ -21,6 +20,10 @@ import { isVaultKeySet } from './crypto';
 import { plugins } from './plugins';
 import { EDITION, features, licenseInfo } from './edition';
 import { db, failStaleActiveRuns, pruneOldRuns, pruneOrphanedDeprecatedWorkflows } from './db';
+import { resolveAuthConfig, usesPlaintextPassword } from './auth/config';
+import { reconcileConfigUser } from './auth/seed';
+import { registerAuth, readStaticAssetIndex, findStaticApiCollisions, type StaticAssetIndex } from './auth/plugin';
+import { pruneExpiredSessions } from './auth/sessions';
 
 const DATA_DIR        = path.resolve(process.env.DB_PATH ? path.dirname(process.env.DB_PATH) : './data');
 const FILE_TTL_MS     = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -49,61 +52,52 @@ const cleanupDir = (dir: string, ttlMs: number, lastUsedFile?: string) => {
 const cleanupOldFiles   = () => cleanupDir(path.join(DATA_DIR, 'files'),   FILE_TTL_MS);
 const cleanupOldSandbox = () => cleanupDir(path.join(DATA_DIR, 'sandbox'), SANDBOX_TTL_MS, '.last-used');
 
-// ─── API authentication ──────────────────────────────────────────────────────
-// Set API_TOKEN to require a shared token on every API route. Unset = open
-// (previous behaviour), with a startup warning.
-//
-// Exempt by design:
-//   /webhooks/*  — external senders; protected by per-trigger HMAC secrets
-//   /health      — service liveness probes
-//   /api/ai/*    — AI capability reference: capability shapes only, never user
-//                  data (enforced by test), consumed by external AI tools
-//   /files/*, /media/* — static media fetched by sidecars (voice-to-text)
-//   static SPA assets  — the UI must load before a token can be entered
-const API_TOKEN = process.env.API_TOKEN ?? '';
-
-const PROTECTED_PREFIXES = [
-  '/workflows', '/scripts', '/runs', '/triggers', '/secrets',
-  '/datastore', '/admin', '/services', '/stats', '/plugins', '/api',
-  '/assistant',
-];
-
-const sha256 = (s: string) => createHash('sha256').update(s).digest();
-
-// Hash both sides so timingSafeEqual gets equal-length buffers.
-const tokenMatches = (candidate: string): boolean =>
-  timingSafeEqual(sha256(candidate), sha256(API_TOKEN));
-
-const extractToken = (req: { headers: Record<string, unknown>; query: unknown }): string | undefined => {
-  const auth = req.headers['authorization'];
-  if (typeof auth === 'string' && auth.startsWith('Bearer ')) return auth.slice(7);
-  const headerToken = req.headers['x-api-token'];
-  if (typeof headerToken === 'string') return headerToken;
-  // EventSource cannot set headers — SSE connects with ?token=…
-  const queryToken = (req.query as Record<string, unknown> | undefined)?.token;
-  if (typeof queryToken === 'string') return queryToken;
-  return undefined;
-};
-
-const isProtectedPath = (url: string): boolean => {
-  const p = url.split('?')[0];
-  if (p.startsWith('/api/ai/') || p === '/api/ai') return false;
-  return PROTECTED_PREFIXES.some((prefix) => p === prefix || p.startsWith(prefix + '/'));
-};
-
+// ─── Authentication ──────────────────────────────────────────────────────────
+// Every protected route requires a valid login session (see auth/plugin.ts). The
+// single free-tier user is configured statically via AUTH_USERNAME / AUTH_PASSWORD
+// (or AUTH_PASSWORD_HASH); resolveAuthConfig throws if no credential is set, so an
+// instance can never come up unauthenticated. The users/sessions schema is the
+// substrate the premium multi-tenant feature builds on.
 export const buildServer = async () => {
+  // Resolve auth config first so a misconfiguration fails fast, before any
+  // listeners or side effects. Throws AuthConfigError (handled in index.ts).
+  const authConfig = resolveAuthConfig();
+  reconcileConfigUser(authConfig);
+
+  // Index the SPA root up-front (only served in production) so the deny-by-default
+  // auth gate can tell a genuine public asset from an API call without an allowlist
+  // of API prefixes. A missing build dir yields an empty index (see the guard in
+  // the static registration below).
+  const spaStaticRoot = process.env.NODE_ENV === 'production'
+    ? path.resolve(process.env.STATIC_DIR ?? './public')
+    : null;
+  const staticAssets: StaticAssetIndex = spaStaticRoot
+    ? readStaticAssetIndex(spaStaticRoot)
+    : { files: new Set(), dirs: new Set() };
+
   const app = Fastify({
+    // Behind a reverse proxy (the supported deployment), set TRUST_PROXY so req.ip
+    // reflects the real client via X-Forwarded-For — used for login throttling and
+    // request logs. Accepts a boolean, a hop count, or a CIDR/IP allowlist. Leave
+    // unset when the app is directly exposed, so clients can't spoof their IP.
+    trustProxy: (() => {
+      const v = process.env.TRUST_PROXY?.trim();
+      if (!v) return false;
+      if (/^(true|false)$/i.test(v)) return v.toLowerCase() === 'true';
+      if (/^\d+$/.test(v)) return Number(v);
+      return v; // comma-separated IP/CIDR list
+    })(),
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
       transport: process.env.NODE_ENV !== 'production'
         ? { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' } }
         : undefined,
-      redact: ['req.headers.authorization', 'req.headers["x-api-token"]'],
+      // Keep the session cookie and the internal loopback token out of the logs.
+      redact: ['req.headers.cookie', 'req.headers["x-internal-token"]'],
       serializers: {
-        // Keep SSE ?token=… out of the logs.
         req: (req: { method: string; url: string; ip: string }) => ({
           method: req.method,
-          url:    req.url.replace(/([?&]token=)[^&]*/g, '$1[redacted]'),
+          url:    req.url,
           ip:     req.ip,
         }),
       },
@@ -113,24 +107,27 @@ export const buildServer = async () => {
   // CORS: default is same-origin only (no cross-origin headers at all) — the
   // UI is served from this server and sidecars are not browsers. Set
   // CORS_ORIGIN to a comma-separated origin list (or '*') to open it up.
+  // When cross-origin is enabled, credentials must be allowed so the browser
+  // sends the session cookie (paired with SameSite=None on the cookie).
   const corsOrigin = process.env.CORS_ORIGIN;
   await app.register(cors, {
     origin: !corsOrigin ? false : corsOrigin === '*' ? true : corsOrigin.split(',').map((s) => s.trim()),
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    credentials: !!corsOrigin,
   });
 
-  if (API_TOKEN) {
-    app.addHook('onRequest', async (req, reply) => {
-      if (!isProtectedPath(req.url)) return;
-      if (req.method === 'OPTIONS') return; // CORS preflight carries no credentials
-      const token = extractToken(req);
-      if (token && tokenMatches(token)) return;
-      return reply.code(401).send({ error: 'Unauthorized — provide the API token (Authorization: Bearer <token>)' });
-    });
-  }
+  // Collect the top-level segment of every registered route so we can fail closed
+  // if a served SPA asset shadows one (checked after all routes register).
+  const apiSegments = new Set<string>();
+  app.addHook('onRoute', (route) => {
+    const seg = route.url.split('/')[1];
+    if (seg && seg !== '*') apiSegments.add(seg);
+  });
 
-  // The UI checks this (protected) endpoint to decide whether to ask for a token.
-  app.get('/api/auth/check', async () => ({ ok: true }));
+  // Login/session gate for every protected route, plus /api/auth/{login,logout,check}.
+  // Registered globally (fastify-plugin) so the onRequest gate covers all routes.
+  // staticAssets lets the gate serve the SPA shell + assets before a session exists.
+  await app.register(registerAuth, { config: authConfig, staticAssets });
 
   // Edition + feature flags — the UI reads this to gate premium surfaces.
   app.get('/api/edition', async () => ({
@@ -184,8 +181,11 @@ export const buildServer = async () => {
   if (!isVaultKeySet()) {
     app.log.warn('VAULT_KEY is not set — secrets are disabled. Set VAULT_KEY in the environment to enable the secrets store.');
   }
-  if (!API_TOKEN) {
-    app.log.warn('API_TOKEN is not set — the API (including secrets export and workflow execution) is open to anyone who can reach this port. Set API_TOKEN to require authentication.');
+  if (usesPlaintextPassword()) {
+    app.log.warn('AUTH_PASSWORD is set as plaintext — hashed at startup, but the cleartext lives in your deploy config. Prefer AUTH_PASSWORD_HASH (generate with `npm run auth:hash-password`).');
+  }
+  if (!authConfig.cookieSecure) {
+    app.log.warn('Session cookie is not marked Secure — fine for local HTTP, but set AUTH_COOKIE_SECURE=true (and serve over HTTPS) before exposing this instance publicly.');
   }
 
   const stale = failStaleActiveRuns();
@@ -204,19 +204,26 @@ export const buildServer = async () => {
     if (droppedWfs > 0) app.log.info(`Removed ${droppedWfs} deprecated workflow(s) with no remaining runs`);
   };
 
+  const pruneSessions = () => {
+    const removed = pruneExpiredSessions();
+    if (removed > 0) app.log.info(`Pruned ${removed} expired session(s)`);
+  };
+
   startAllTriggers();
   startCatchupWatcher();
   cleanupOldFiles();
   cleanupOldSandbox();
   pruneRuns();
+  pruneSessions();
 
-  // File/sandbox TTLs and retention were only enforced at boot — long-lived
-  // servers never cleaned up again. Re-run periodically.
+  // File/sandbox TTLs, retention, and expired sessions were only enforced at boot
+  // — long-lived servers never cleaned up again. Re-run periodically.
   const CLEANUP_INTERVAL_MS = 12 * 60 * 60 * 1000;
   setInterval(() => {
     cleanupOldFiles();
     cleanupOldSandbox();
     pruneRuns();
+    pruneSessions();
   }, CLEANUP_INTERVAL_MS).unref();
 
   // Serve files produced by sandboxed script nodes
@@ -237,10 +244,20 @@ export const buildServer = async () => {
     decorateReply: false,
   });
 
-  if (process.env.NODE_ENV === 'production') {
-    const staticRoot = path.resolve(process.env.STATIC_DIR ?? './public');
-    await app.register(fastifyStatic, { root: staticRoot, prefix: '/' });
+  if (spaStaticRoot) {
+    await app.register(fastifyStatic, { root: spaStaticRoot, prefix: '/' });
     app.setNotFoundHandler((_req, reply) => { reply.sendFile('index.html'); });
+  }
+
+  // Fail closed: a SPA asset that shadows a protected route would be served
+  // unauthenticated by the '/' static mount — the mirror image of the gate we
+  // just hardened. Refuse to start on such a collision.
+  const collisions = findStaticApiCollisions(staticAssets, apiSegments);
+  if (collisions.length > 0) {
+    throw new Error(
+      `SPA static asset(s) shadow protected API route(s): ${collisions.map((c) => `/${c}`).join(', ')}. ` +
+      'Rename the asset (e.g. vite build.assetsDir) or the route so the auth gate cannot serve it unauthenticated.',
+    );
   }
 
   return app;

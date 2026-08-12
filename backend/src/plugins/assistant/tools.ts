@@ -140,6 +140,13 @@ export function validateProposal(kind: string, json: unknown): { ok: boolean; er
   if (kind === 'trigger') {
     if (typeof obj.kind !== 'string' || !obj.kind) errors.push('trigger.kind is required');
     if (typeof obj.config !== 'object' || obj.config === null) errors.push('trigger.config object is required');
+    // A trigger must name a target workflow (a sibling of config, not nested).
+    // We only check structure here — target.id may be the workflow's NAME, resolved
+    // to a real id on Apply, so we can't verify the workflow exists at propose time.
+    const target = obj.target as { type?: string; id?: string } | undefined;
+    if (!target || target.type !== 'workflow' || !target.id) {
+      errors.push('trigger.target must be { type: "workflow", id: "<the target workflow\'s name or id>" }');
+    }
     if (errors.length) return { ok: false, errors };
     return { ok: true, summary: `${obj.name ? String(obj.name) + ' — ' : ''}${obj.kind as string}` };
   }

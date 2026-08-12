@@ -39,6 +39,20 @@ function scheduleConfigError(kind: string | undefined, config: unknown): string 
   return null;
 }
 
+// A workflow-targeted trigger whose workflow doesn't exist is worse than useless:
+// fireWorkflowRun returns null on a missing workflow (runner/fire.ts), so an
+// enabled schedule ticks forever into nothing — no run row, no error, no log,
+// while the UI shows it as applied. Reject a dangling target at write time. Only
+// checked for `type: 'workflow'` targets (the only kind that resolves to an id).
+function targetError(target: unknown): string | null {
+  const t = target as { type?: string; id?: string } | undefined;
+  if (!t || t.type !== 'workflow') return null;
+  if (!t.id || !db.getWorkflow(t.id)) {
+    return `Trigger target workflow "${t.id ?? ''}" does not exist. Create/apply the workflow first, then wire the trigger to it.`;
+  }
+  return null;
+}
+
 export const triggerRoutes = async (app: FastifyInstance) => {
   // GET /triggers — each trigger augmented with lastRunAt (when it last fired)
   // and canRunNow (whether its adapter supports on-demand firing).
@@ -67,6 +81,8 @@ export const triggerRoutes = async (app: FastifyInstance) => {
     }
     const cronError = scheduleConfigError(body.kind, body.config);
     if (cronError) return reply.code(400).send({ error: cronError });
+    const targetErr = targetError(body.target);
+    if (targetErr) return reply.code(400).send({ error: targetErr });
     const now = Date.now();
     const trigger: Trigger = { ...body, id: randomUUID(), createdAt: now, updatedAt: now };
     db.upsertTrigger(trigger);
@@ -89,6 +105,10 @@ export const triggerRoutes = async (app: FastifyInstance) => {
     if (body.config !== undefined) {
       const cronError = scheduleConfigError(body.kind ?? existing.kind, body.config);
       if (cronError) return reply.code(400).send({ error: cronError });
+    }
+    if (body.target !== undefined) {
+      const targetErr = targetError(body.target);
+      if (targetErr) return reply.code(400).send({ error: targetErr });
     }
 
     // lastRunAt and canRunNow are derived fields the client echoes back; never persist them onto the entity.
